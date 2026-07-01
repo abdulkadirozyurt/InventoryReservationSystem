@@ -13,6 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\src\services\InventoryService\InventoryService.API\InventoryService.API.csproj" />
     <ProjectReference Include="..\src\services\OrderService\OrderService.API\OrderService.API.csproj" />
   </ItemGroup>
 

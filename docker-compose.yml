@@ -11,6 +11,8 @@ services:
     depends_on:
       - mongodb
       - redis
+    networks:
+      - inventory-reservation-network
 
   orderservice-api:
     build:
@@ -26,18 +28,149 @@ services:
       - inventoryservice-api
       - mongodb
       - redis
+    networks:
+      - inventory-reservation-network
 
   mongodb:
-    image: mongo:8.0
+    image: mongo:8.2.11
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     ports:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' | grep 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - inventory-reservation-network
+
+  mongo-init:
+    image: mongo:8.2.11
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: "no"
+    command: >
+      bash -c '
+        mongosh --host mongodb:27017 --eval "
+          try {
+            rs.status();
+            print(\"Replica set already initialized\");
+          } catch (e) {
+            rs.initiate({
+              _id: \"rs0\",
+              members: [
+                { _id: 0, host: \"mongodb:27017\" }
+              ]
+            });
+            print(\"Replica set initialized\");
+          }
+        "
+      '
+    networks:
+      - inventory-reservation-network
 
   redis:
-    image: redis:8.2-alpine
+    image: redis:8.8.0-alpine
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - inventory-reservation-network
+
+  redisinsight:
+    image: redis/redisinsight:3.6.0
+    ports:
+      - "5540:5540"
+    volumes:
+      - redisinsight_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - inventory-reservation-network
+
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-otlp-receiver"
+    networks:
+      - inventory-reservation-network
+
+  loki:
+    image: grafana/loki:3.7.3
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki/loki.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    networks:
+      - inventory-reservation-network
+
+  tempo:
+    image: grafana/tempo:main-df60310-1926-1
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - ./observability/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo_data:/var/tempo
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    networks:
+      - inventory-reservation-network
+
+  grafana:
+    image: grafana/grafana:13.0.3
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: false
+      GF_PLUGINS_PLUGIN_ADMIN_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    networks:
+      - inventory-reservation-network
 
 volumes:
   mongodb_data:
+  redis_data:
+  redisinsight_data:
+  prometheus_data:
+  loki_data:
+  tempo_data:
+  grafana_data:
+
+networks:
+  inventory-reservation-network:
+    driver: bridge

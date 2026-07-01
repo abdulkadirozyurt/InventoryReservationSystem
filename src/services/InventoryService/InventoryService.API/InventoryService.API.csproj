@@ -12,8 +12,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\..\..\InventoryReservationSystem.ServiceDefaults\InventoryReservationSystem.ServiceDefaults.csproj" />
-    <ProjectReference Include="..\..\..\..\contracts\InventoryReservationSystem.Contracts\InventoryReservationSystem.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\..\InventoryReservationSystem.ServiceDefaults\InventoryReservationSystem.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\..\..\contracts\InventoryReservationSystem.Contracts\InventoryReservationSystem.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

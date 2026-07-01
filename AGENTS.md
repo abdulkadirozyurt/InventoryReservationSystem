@@ -2,6 +2,7 @@
 
 Caveman mode: short. Clear. Why > what. Keep strict architectural intent.
 Project status, roadmap, and phase checklist are tracked in this file (`AGENTS.md`) under the "Current Focus" and "Live Project State" sections. Treat this document as a living organism.
+README.md is the public project entry point and must stay continuously up to date as the project evolves. Update README.md after architecture, dependency, setup, endpoint, workflow, or status changes.
 
 ##  1. Core Agent Philosophy & Rules
 
