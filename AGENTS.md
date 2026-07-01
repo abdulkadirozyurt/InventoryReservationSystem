@@ -34,10 +34,9 @@ InventoryReservationSystem/
 │       │       └── Mongo/
 │       └── InventoryService/
 │           ├── InventoryService.API/
-│           │   └── InventoryService.API/
-│           │       ├── Grpc/
-│           │       ├── Properties/
-│           │       └── Program.cs
+│           │   ├── Grpc/
+│           │   ├── Properties/
+│           │   └── Program.cs
 │           ├── InventoryService.Application/
 │           │   └── Reservations/
 │           │       ├── Abstractions/
@@ -75,9 +74,42 @@ Dependencies must point inward: `API` and `Infrastructure` depend on `Applicatio
 
 Detailed project definition, requirements, evaluation scenarios, and deliverables are documented in `Docs/about-project/project-definition-and-requirements.md`.
 
+# Engineering Approach
+
+This repository favors incremental, reviewed changes over large autonomous implementations.
+
+- Explain the approach and trade-offs before implementing.
+- Do not implement a full feature end-to-end without an explicit go-ahead.
+- Work in small, testable units; avoid opportunistic multi-file changes.
+- When introducing a new protocol or pattern (e.g. a new gRPC contract, a new
+  concurrency strategy), state the concept explicitly rather than assuming it's known.
+- When proposing code, contrast a naive approach with the correct one and explain why
+  the naive one fails (concurrency, transaction boundaries, performance, etc.).
+
+# Workflow
+
+1. Understand the requirement.
+2. Identify constraints and hidden dependencies.
+3. Explain approach before writing code (see Engineering Approach).
+4. Execute in small, testable units.
+5. After finishing a step, state the next recommended task explicitly.
+
+# Maintenance
+
+Update this file when a service boundary, communication pattern, or structural
+convention changes. Remove stale or incorrect notes on sight — do not let this
+file become a graveyard of outdated decisions.
+
+# Current Focus
+
+Implementing: gRPC contract definitions (`src/contracts/protos`).
+Next: OrderService REST skeleton (`Endpoints`), no business logic yet.
+
 # Notes
 
 - `OrderService` owns REST order endpoints and calls `InventoryService` over gRPC.
 - `InventoryService` owns stock, reservations, Redis locking, expiry, and release/confirm flows.
-- Domain projects contain core entities and statuses; Application projects contain use cases and abstractions; Infrastructure projects contain MongoDB, Redis, and gRPC integrations.
-- `test/`, scripts, Docker Compose, and proto files are not fully created yet; add them when implementation starts.
+- Domain projects contain core entities and statuses; Application projects contain use cases
+  and abstractions; Infrastructure projects contain MongoDB, Redis, and gRPC integrations.
+- `test/`, scripts, Docker Compose, and proto files are not fully created yet; add them when
+  implementation starts.

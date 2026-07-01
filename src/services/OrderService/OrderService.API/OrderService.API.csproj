@@ -14,4 +14,9 @@
     <ProjectReference Include="..\..\..\..\InventoryReservationSystem.ServiceDefaults\InventoryReservationSystem.ServiceDefaults.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Contracts\" />
+    <Folder Include="Endpoints\" />
+  </ItemGroup>
+
 </Project>

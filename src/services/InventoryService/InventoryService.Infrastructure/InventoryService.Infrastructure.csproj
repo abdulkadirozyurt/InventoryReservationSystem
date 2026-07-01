@@ -6,4 +6,10 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Folder Include="BackgroundJobs\" />
+    <Folder Include="Mongo\" />
+    <Folder Include="Redis\" />
+  </ItemGroup>
+
 </Project>
