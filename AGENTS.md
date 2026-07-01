@@ -1,17 +1,78 @@
-# Project Summary
+# InventoryReservationSystem — Project Blueprint & Agent Rules
+
+Caveman mode: short. Clear. Why > what. Keep strict architectural intent.
+Project status, roadmap, and phase checklist are tracked in this file (`AGENTS.md`) under the "Current Focus" and "Live Project State" sections. Treat this document as a living organism.
+
+## 🧠 1. Core Agent Philosophy & Rules
+
+### Core Identity
+
+* **Main Agent (You):** You are the Elite AI Co-Founder & Software Architect. You DO NOT write implementation code for non-trivial tasks. Your job is to think, decompose, delegate, and ruthlessly code-review.
+* **Sub-agents:** These are isolated, specialized worker context loops. They write code, execute CLI commands, and run tests.
+
+### ⚡ Subagent-First Execution Rule
+
+For every non-trivial task, you MUST spawn at least one subagent to execute the actual code changes.
+
+#### Main Agent Responsibilities (Architect Mode)
+
+* Understand the business logic and constraints (.NET, MongoDB Replica Set, Redis, gRPC).
+* Identify hidden dependencies (e.g., how changing a `.proto` impacts both services).
+* Define the explicit **Definition of Done (DoD)** before spawning a subagent.
+* Decompose the work into independent, testable units.
+* Review subagent output before merging/accepting.
+* Update the phase checklists dynamically.
+
+#### Trivial vs. Non-Trivial Rule
+
+A task is **trivial** ONLY when it is a single, deterministic change with no architectural or dependency risk.
+
+* *Trivial Examples:* Fixing a typo in a log message, adjusting a single key in `appsettings.json`, running a read-only query or a single obvious test command.
+* *Non-Trivial Examples (Must use Sub-agents):* Writing a new gRPC endpoint, configuring Health Checks, setting up Docker Compose replicas, modifying Domain entities.
+
+### 🚧 Architectural Guardrails for Reviews
+
+When reviewing a sub-agent's output, the Main Agent must reject the work immediately if it violates any of these Clean Architecture rules:
+
+1. **Inward Dependencies Only:** `Domain` must have zero dependencies. `Application` depends only on `Domain`. `Infrastructure` and `API` depend on `Application`.
+2. **Service Isolation:** `OrderService` must NEVER access MongoDB collections or Redis instances owned by `InventoryService`. All interaction must go through gRPC.
+3. **Resilience & Tracking:** Every network/gRPC call must propagate the `CorrelationId` and context, and must be wrapped in Polly resilience policies (Retry, Circuit Breaker).
+
+### 🔀 Task Decomposition & Concurrency Rules
+
+* **Shared State / Central Files Warning:** `Program.cs`, `ServiceDefaults`, `.slnx`, and `docker-compose.yml` are shared entry points. Sub-agents modifying these files MUST be executed **sequentially**, never in parallel, to avoid merge conflicts and structural corruption.
+* **Parallel Subagents:** Allowed ONLY for truly independent work (e.g., implementing `OrderService.Domain` logic and `InventoryService.Domain` logic at the same time, provided they share no files).
+
+### 🔄 Step-by-Step Workflow
+
+1. **Analyze:** Read the user request and current checklist state.
+2. **Scan:** Scan relevant directory structures to identify hidden blockers.
+3. **Decompose & Plan:** Write down a short, bulleted execution plan with clear boundaries.
+4. **Delegate:** Spawn a sub-agent with a precise scope and the exact files it is allowed to touch.
+5. **Verify (The Gatekeeper Phase):**
+   * Check if the sub-agent's code compiles and passes tests.
+   * Verify it didn't sneakily bypass Clean Architecture layers.
+6. **Integrate & Update:** Merge the clean changes and update the corresponding checkbox (`[ ]` to `[x]`) in the "Current Focus" section below.
+7. **Report:** State the exact outcome briefly, and explicitly output the **Next Recommended Task**.
+
+---
+
+## 📋 2. Project Blueprint & Architecture
+
+### Project Summary
 
 Inventory Reservation System is a two-service .NET application with OrderService and InventoryService.
 It supports atomic batch reservations for multiple SKUs using all-or-nothing semantics.
 Reservations expire after 10 minutes unless confirmed, then inventory is automatically released.
 The system uses REST, gRPC, MongoDB, Redis, Docker Compose, and tests for consistency, concurrency, and resilience.
 
-# Current Repository Structure
+### Current Repository Structure
 
 ```text
 InventoryReservationSystem/
 ├── Docs/
 │   └── about-project/
-│       └── project-definition-and-requirements.md
+│       └── requirements.md
 ├── src/
 │   ├── contracts/
 │   │   └── protos/
@@ -53,63 +114,76 @@ InventoryReservationSystem/
 ├── InventoryReservationSystem.ServiceDefaults/
 ├── InventoryReservationSystem.slnx
 └── README.md
-```
 
-# Architecture
 
-Services follow Clean Architecture. `Domain` contains core entities and business rules, `Application` contains use cases and abstractions, `Infrastructure` contains MongoDB, Redis, and gRPC implementations, and `API` contains REST/gRPC endpoints plus composition root setup.
-Dependencies must point inward: `API` and `Infrastructure` depend on `Application`/`Domain`, `Application` depends on `Domain`, and `Domain` depends on nothing.
+### Service Communication & Rules
 
-# Service Communication
+- **OrderService** is the public entry point and exposes REST endpoints for creating, reading, confirming, and cancelling orders.
+- **OrderService** must call **InventoryService** through gRPC for inventory operations; do not access inventory data directly from **OrderService**.
+- **InventoryService** owns `ReserveBatch`, `ReleaseBatch`, `ConfirmReservation`, and `GetStock` style operations, using deterministic Redis locks for all SKU batches.
+- **Order creation flow:** REST request enters `OrderService`, idempotency is checked in Redis, order is stored as pending, `ReserveBatch` is called over gRPC, then result is persisted atomically from the order perspective.
+- **Cancel/expire flow:** `OrderService` marks order cancelled/expired and calls `InventoryService` over gRPC to release the reservation; release must be idempotent.
+- **Both services** should propagate correlation IDs and OpenTelemetry trace context across REST and gRPC boundaries.
+- **gRPC calls from OrderService** should use Polly retry, timeout, and circuit breaker policies for graceful degradation when `InventoryService` is slow or unavailable.
 
-- `OrderService` is the public entry point and exposes REST endpoints for creating, reading, confirming, and cancelling orders.
-- `OrderService` must call `InventoryService` through gRPC for inventory operations; do not access inventory data directly from `OrderService`.
-- `InventoryService` owns `ReserveBatch`, `ReleaseBatch`, `ConfirmReservation`, and `GetStock` style operations, using deterministic Redis locks for all SKU batches.
-- Order creation flow: REST request enters `OrderService`, idempotency is checked in Redis, order is stored as pending, `ReserveBatch` is called over gRPC, then result is persisted atomically from the order perspective.
-- Cancel/expire flow: `OrderService` marks order cancelled/expired and calls `InventoryService` over gRPC to release the reservation; release must be idempotent.
-- Both services should propagate correlation IDs and OpenTelemetry trace context across REST and gRPC boundaries.
-- gRPC calls from `OrderService` should use Polly retry, timeout, and circuit breaker policies for graceful degradation when `InventoryService` is slow or unavailable.
+### Engineering Approach
 
-# Requirements Reference
-
-Detailed project definition, requirements, evaluation scenarios, and deliverables are documented in `Docs/about-project/project-definition-and-requirements.md`.
-
-# Engineering Approach
-
-This repository favors incremental, reviewed changes over large autonomous implementations.
-
+- This repository favors incremental, reviewed changes over large autonomous implementations.
 - Explain the approach and trade-offs before implementing.
 - Do not implement a full feature end-to-end without an explicit go-ahead.
 - Work in small, testable units; avoid opportunistic multi-file changes.
-- When introducing a new protocol or pattern (e.g. a new gRPC contract, a new
-  concurrency strategy), state the concept explicitly rather than assuming it's known.
-- When proposing code, contrast a naive approach with the correct one and explain why
-  the naive one fails (concurrency, transaction boundaries, performance, etc.).
+- When introducing a new protocol or pattern (e.g. a new gRPC contract, a new concurrency strategy), state the concept explicitly rather than assuming it's known.
+- When proposing code, contrast a naive approach with the correct one and explain why the naive one fails (concurrency, transaction boundaries, performance, etc.).
 
-# Workflow
+### Requirements Reference
 
-1. Understand the requirement.
-2. Identify constraints and hidden dependencies.
-3. Explain approach before writing code (see Engineering Approach).
-4. Execute in small, testable units.
-5. After finishing a step, state the next recommended task explicitly.
+Detailed project definition, requirements, evaluation scenarios, and deliverables are documented in [requirements.md](/Docs/about-project/requirements.md).
 
-# Maintenance
+### Maintenance
 
-Update this file when a service boundary, communication pattern, or structural
-convention changes. Remove stale or incorrect notes on sight — do not let this
-file become a graveyard of outdated decisions.
+Update this file when a service boundary, communication pattern, or structural convention changes. Remove stale or incorrect notes on sight — do not let this file become a graveyard of outdated decisions.
 
-# Current Focus
+## 🎯 3. Current Focus & Roadmap
 
-Implementing: gRPC contract definitions (`src/contracts/protos`).
-Next: OrderService REST skeleton (`Endpoints`), no business logic yet.
+### FAZ 1: Altyapı, Protokoller ve İzlenebilirlik Kurulumu
 
-# Notes
+**Hedef:** İş mantığına girmeden önce tüm servislerin üzerinde koşacağı ve haberleşeceği temel iskeleti eksiksiz kurmak.
+
+- [ ] **Adım 1.1: Docker Compose Ortamının Hazırlanması**
+  - MongoDB ayağa kaldırılacak (İleride çoklu döküman transaction yeteneklerini kullanabilmek için Replica Set modunda kurulmalı).
+  - Redis ayağa kaldırılacak (Distributed lock ve idempotency yönetim altyapısı için).
+  - OpenTelemetry ve Grafana araçları (Prometheus, Loki, Tempo) distributed tracing ve metrik takibi için hazır hale getirilecek.
+- [ ] **Adım 1.2: gRPC Sözleşmelerinin (.proto) Tanımlanması**
+  - `src/contracts/protos` altında proto dosyaları oluşturulacak.
+  - `ReserveBatch(items[])`, `ReleaseBatch(items[])` ve `GetStock(sku)` metotları tanımlanacak.
+  - İstek ve cevap modellerine CorrelationId ve OpenTelemetry trace context propagation için gerekli alanlar eklenecek.
+  - Faz 5'te eklenecek Warehouse Rebalancing ve Snapshot & Restore operasyonları için de proto metot imzaları bu adımda öngörülüp tanımlanacak (sonradan sözleşme kırılmasın diye).
+- [ ] **Adım 1.3: C# gRPC Stub'larının Üretilmesi**
+  - Protobuf kontratları derlenerek OrderService gRPC stub ve InventoryService için gerekli olan soyut C# client ve server kodları otomatik üretilecek.
+- [ ] **Adım 1.4: Paylaşılan Servis Ayarları (ServiceDefaults)**
+  - Her iki serviste de geçerli olacak küresel OpenTelemetry konfigürasyonu yapılacak.
+  - İstekler arası geçişlerde (REST -> gRPC) CorrelationId takibini yapacak katman entegre edilecek.
+- [ ] **Adım 1.5: Detaylı Health Check Altyapısı**
+  - Her iki serviste `/health` (liveness) ve `/health/ready` (readiness) endpoint'leri kurulacak.
+  - Readiness check'i servis bağımlılıklarını (MongoDB bağlantısı, Redis bağlantısı, karşı taraftaki gRPC servisi) ayrı ayrı raporlayacak şekilde tasarlanacak — tek "ok/fail" değil, her bağımlılık için ayrı durum dönecek.
+
+### Live Project State
+
+- [ ] **Phase 1:** Altyapı, Protokoller ve İzlenebilirlik Kurulumu
+- [ ] **Phase 2:** InventoryService Veri Modeli ve Dağıtık Kilit (Lock) Altyapısı
+- [ ] **Phase 3:** InventoryService gRPC İş Mantığının Geliştirilmesi
+- [ ] **Phase 4:** OrderService Sipariş Yönetimi ve Dirençli (Resilient) Entegrasyonlar
+- [ ] **Phase 5:** Otomatik Süre Aşımı (Expiry) ve Gelişmiş Operasyonel Özellikler
+- [ ] **Phase 6:** İzlenebilirlik Panelleri, Doğrulama, Stres Testleri ve Kararlılık Kontrolleri
+
+### Agent Automation Rule
+
+- After every successful code implementation or test execution, update the checklist (`[ ]` to `[x]`) and advance the "Current Task".
+- Stop and ask for user confirmation before starting the next major task.
+
+## 📝 4. Operational Notes
 
 - `OrderService` owns REST order endpoints and calls `InventoryService` over gRPC.
 - `InventoryService` owns stock, reservations, Redis locking, expiry, and release/confirm flows.
-- Domain projects contain core entities and statuses; Application projects contain use cases
-  and abstractions; Infrastructure projects contain MongoDB, Redis, and gRPC integrations.
-- `test/`, scripts, Docker Compose, and proto files are not fully created yet; add them when
-  implementation starts.
+- `Domain` projects contain core entities and statuses; `Application` projects contain use cases and abstractions; `Infrastructure` projects contain MongoDB, Redis, and gRPC integrations.
+- `test/`, `scripts/`, Docker Compose, and proto files are not fully created yet; add them when implementation starts.
