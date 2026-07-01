@@ -151,7 +151,7 @@ Update this file when a service boundary, communication pattern, or structural c
 
 **Hedef:** İş mantığına girmeden önce tüm servislerin üzerinde koşacağı ve haberleşeceği temel iskeleti eksiksiz kurmak.
 
-- [ ] **Adım 1.1: Docker Compose Ortamının Hazırlanması**
+- [x] **Adım 1.1: Docker Compose Ortamının Hazırlanması**
   - MongoDB ayağa kaldırılacak (İleride çoklu döküman transaction yeteneklerini kullanabilmek için Replica Set modunda kurulmalı).
   - Redis ayağa kaldırılacak (Distributed lock ve idempotency yönetim altyapısı için).
   - OpenTelemetry ve Grafana araçları (Prometheus, Loki, Tempo) distributed tracing ve metrik takibi için hazır hale getirilecek.

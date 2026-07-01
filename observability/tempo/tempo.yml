@@ -11,21 +11,9 @@ distributor:
         http:
         grpc:
 
-ingester:
-  trace_idle_period: 10s
-  max_block_duration: 5m
-
-compactor:
-  compaction:
-    block_size_bytes: 524288000
-    keep_block_size_bytes: 104857600
-    retention: 24h
-
 storage:
   trace:
     backend: local
-    block:
-      blobs_layout: compact
     wal:
       path: /var/tempo/wal
     local:
