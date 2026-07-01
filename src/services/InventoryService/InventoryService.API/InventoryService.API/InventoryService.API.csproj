@@ -7,15 +7,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" Version="2.80.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.9" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\..\InventoryReservationSystem.ServiceDefaults\InventoryReservationSystem.ServiceDefaults.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Grpc\" />
+    <ProjectReference Include="..\..\..\..\contracts\InventoryReservationSystem.Contracts\InventoryReservationSystem.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

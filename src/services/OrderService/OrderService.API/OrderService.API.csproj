@@ -7,16 +7,18 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Grpc.Net.ClientFactory" Version="2.80.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.9" />
+    <PackageReference Include="Scalar.AspNetCore" Version="2.16.7" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\InventoryReservationSystem.ServiceDefaults\InventoryReservationSystem.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\..\..\contracts\InventoryReservationSystem.Contracts\InventoryReservationSystem.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Folder Include="Contracts\" />
-    <Folder Include="Endpoints\" />
   </ItemGroup>
 
 </Project>

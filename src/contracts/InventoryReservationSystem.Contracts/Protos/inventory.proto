@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+option csharp_namespace = "InventoryReservationSystem.Contracts.Inventory";
+
+package inventory.v1;
+
+service InventoryReservations {
+  rpc Reserve (ReserveInventoryRequest) returns (ReserveInventoryResponse);
+  rpc Confirm (ConfirmReservationRequest) returns (ConfirmReservationResponse);
+  rpc Release (ReleaseReservationRequest) returns (ReleaseReservationResponse);
+}
+
+message ReserveInventoryRequest {
+  string order_id = 1;
+  repeated ReservationItem items = 2;
+}
+
+message ReservationItem {
+  string sku = 1;
+  int32 quantity = 2;
+}
+
+message ReserveInventoryResponse {
+  bool success = 1;
+  string reservation_id = 2;
+  repeated ReservationFailure failures = 3;
+}
+
+message ReservationFailure {
+  string sku = 1;
+  string reason = 2;
+}
+
+message ConfirmReservationRequest {
+  string reservation_id = 1;
+}
+
+message ConfirmReservationResponse {
+  bool success = 1;
+}
+
+message ReleaseReservationRequest {
+  string reservation_id = 1;
+}
+
+message ReleaseReservationResponse {
+  bool success = 1;
+}

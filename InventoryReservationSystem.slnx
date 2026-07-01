@@ -1,7 +1,8 @@
 <Solution>
   <Folder Name="/src/" />
-  <Folder Name="/src/contracts/" />
-  <Folder Name="/src/contracts/protos/" />
+  <Folder Name="/src/contracts/">
+    <Project Path="src/contracts/InventoryReservationSystem.Contracts/InventoryReservationSystem.Contracts.csproj" />
+  </Folder>
   <Folder Name="/src/services/" />
   <Folder Name="/src/services/InventoryService/">
     <Project Path="src/services/InventoryService/InventoryService.API/InventoryService.API/InventoryService.API.csproj" />
