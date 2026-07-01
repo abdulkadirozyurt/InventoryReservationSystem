@@ -1,0 +1,5 @@
+{
+  "appHost": {
+    "path": "InventoryReservationSystem.AppHost/InventoryReservationSystem.AppHost.csproj"
+  }
+}

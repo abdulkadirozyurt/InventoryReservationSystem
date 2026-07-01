@@ -1,0 +1,16 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.2.4">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>417b15f8-cac6-43f9-9500-7e82a2508499</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\src\services\InventoryService\InventoryService.API\InventoryService.API\InventoryService.API.csproj" />
+    <ProjectReference Include="..\src\services\OrderService\OrderService.API\OrderService.API.csproj" />
+  </ItemGroup>
+
+</Project>

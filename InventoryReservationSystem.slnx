@@ -1,0 +1,19 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/services/" />
+  <Folder Name="/src/services/InventoryService/">
+    <Project Path="src/services/InventoryService/InventoryService.API/InventoryService.API/InventoryService.API.csproj" />
+    <Project Path="src/services/InventoryService/InventoryService.Application/InventoryService.Application.csproj" />
+    <Project Path="src/services/InventoryService/InventoryService.Domain/InventoryService.Domain.csproj" />
+    <Project Path="src/services/InventoryService/InventoryService.Infrastructure/InventoryService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/services/OrderService/">
+    <Project Path="src/services/OrderService/OrderService.API/OrderService.API.csproj" />
+    <Project Path="src/services/OrderService/OrderService.Application/OrderService.Application.csproj" />
+    <Project Path="src/services/OrderService/OrderService.Domain/OrderService.Domain.csproj" />
+    <Project Path="src/services/OrderService/OrderService.Infrastructure/OrderService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/test/" />
+  <Project Path="InventoryReservationSystem.AppHost/InventoryReservationSystem.AppHost.csproj" />
+  <Project Path="InventoryReservationSystem.ServiceDefaults/InventoryReservationSystem.ServiceDefaults.csproj" />
+</Solution>
