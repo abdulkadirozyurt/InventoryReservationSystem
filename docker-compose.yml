@@ -1,0 +1,43 @@
+services:
+  inventoryservice-api:
+    build:
+      context: .
+      dockerfile: src/services/InventoryService/InventoryService.API/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+    ports:
+      - "5032:8080"
+    depends_on:
+      - mongodb
+      - redis
+
+  orderservice-api:
+    build:
+      context: .
+      dockerfile: src/services/OrderService/OrderService.API/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      InventoryService__Address: http://inventoryservice-api:8080
+    ports:
+      - "5041:8080"
+    depends_on:
+      - inventoryservice-api
+      - mongodb
+      - redis
+
+  mongodb:
+    image: mongo:8.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+
+  redis:
+    image: redis:8.2-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  mongodb_data:

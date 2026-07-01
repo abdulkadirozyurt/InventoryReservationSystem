@@ -5,7 +5,7 @@
   </Folder>
   <Folder Name="/src/services/" />
   <Folder Name="/src/services/InventoryService/">
-    <Project Path="src/services/InventoryService/InventoryService.API/InventoryService.API/InventoryService.API.csproj" />
+    <Project Path="src/services/InventoryService/InventoryService.API/InventoryService.API.csproj" />
     <Project Path="src/services/InventoryService/InventoryService.Application/InventoryService.Application.csproj" />
     <Project Path="src/services/InventoryService/InventoryService.Domain/InventoryService.Domain.csproj" />
     <Project Path="src/services/InventoryService/InventoryService.Infrastructure/InventoryService.Infrastructure.csproj" />

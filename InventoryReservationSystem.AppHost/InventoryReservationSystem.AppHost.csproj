@@ -9,7 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\src\services\InventoryService\InventoryService.API\InventoryService.API\InventoryService.API.csproj" />
+    <PackageReference Include="MessagePack" Version="3.1.7" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\src\services\OrderService\OrderService.API\OrderService.API.csproj" />
   </ItemGroup>
 
