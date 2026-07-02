@@ -15,6 +15,9 @@ builder.Services.AddGrpcClient<InventoryReservations.InventoryReservationsClient
 
 var app = builder.Build();
 
+app.UseCorrelationId();
+
+
 //if (app.Environment.IsDevelopment())
 //{
 //    app.MapOpenApi();

@@ -17,13 +17,19 @@ public static class OrderEndpoints
 
     private static async Task<IResult> CreateOrderAsync(
         CreateOrderRequest request,
-        InventoryReservations.InventoryReservationsClient inventoryClient)
+        InventoryReservations.InventoryReservationsClient inventoryClient,
+        HttpContext context)
     {
+        var correlationId = context.Items[Microsoft.Extensions.Hosting.Extensions.CorrelationIdItemName]?.ToString()
+                    ?? Guid.CreateVersion7().ToString("N");
+
+
+
         var reserveRequest = new ReserveBatchRequest
         {
             Metadata = new RequestMetadata
             {
-                CorrelationId = Guid.CreateVersion7().ToString("N")
+                CorrelationId = correlationId
             },
             OrderId = Guid.CreateVersion7().ToString("N")
         };

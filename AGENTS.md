@@ -13,7 +13,7 @@ README.md is the public project entry point and must stay continuously up to dat
 
 ### Subagent-First Execution Rule
 
-For every task, you MUST spawn at least one subagent to execute the actual code changes.
+For every task, you MUST spawn at least one subagent to execute the actual code changes or inspect files or another thing. 
 
 #### Main Agent Responsibilities (Architect Mode)
 
@@ -160,11 +160,12 @@ Update this file when a service boundary, communication pattern, or structural c
   - Envanter artırma/azaltma ihtiyacı için rezervasyon akışından bağımsız, admin/operasyonel düzeltme amaçlı `IncreaseStock(sku, warehouseId, quantity, reason)` ve `DecreaseStock(sku, warehouseId, quantity, reason)` metotları sözleşmeye eklendi.
   - İstek ve cevap modellerine `CorrelationId` ve OpenTelemetry trace context propagation için gerekli alanlar eklendi.
   - Faz 5'te eklenecek **Warehouse Rebalancing** ve **Snapshot & Restore** operasyonları için proto metot imzaları öngörülüp tanımlandı.
-- [ ] **Adım 1.3: C# gRPC Stub'larının Üretilmesi**
+- [x] **Adım 1.3: C# gRPC Stub'larının Üretilmesi**
   - Protobuf kontratları derlenerek OrderService ve InventoryService için gerekli olan soyut C# client ve server kodları otomatik üretilecek.
-- [ ] **Adım 1.4: Paylaşılan Servis Ayarları (ServiceDefaults)**
-  - Her iki serviste de geçerli olacak küresel OpenTelemetry konfigürasyonu yapılacak.
-  - İstekler arası geçişlerde (REST -> gRPC) `CorrelationId` takibini yapacak katman entegre edilecek.
+- [x] **Adım 1.4: Paylaşılan Servis Ayarları (ServiceDefaults)**
+  - Her iki serviste de geçerli olacak küresel OpenTelemetry konfigürasyonu yapıldı.
+  - gRPC client instrumentation ServiceDefaults üzerinden etkinleştirildi.
+  - İstekler arası geçişlerde (REST -> gRPC) `CorrelationId` takibini yapacak katman entegre edildi.
 - [ ] **Adım 1.5: Detaylı Health Check Altyapısı**
   - Her iki serviste `/health` (liveness) ve `/health/ready` (readiness) endpoint'leri kurulacak.
   - Readiness check'i servis bağımlılıklarını (MongoDB bağlantısı, Redis bağlantısı, karşı taraftaki gRPC servisi) ayrı ayrı raporlayacak şekilde tasarlanacak — tek "ok/fail" değil, her bağımlılık için ayrı durum dönecek.

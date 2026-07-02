@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 using Microsoft.Extensions.ServiceDiscovery;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
@@ -17,6 +19,8 @@ public static class Extensions
 {
     private const string HealthEndpointPath = "/health";
     private const string AlivenessEndpointPath = "/alive";
+    public const string CorrelationIdHeaderName = "X-Correlation-ID";
+    public const string CorrelationIdItemName = "CorrelationId";
 
     public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
@@ -69,7 +73,7 @@ public static class Extensions
                             && !context.Request.Path.StartsWithSegments(AlivenessEndpointPath)
                     )
                     // Uncomment the following line to enable gRPC instrumentation (requires the OpenTelemetry.Instrumentation.GrpcNetClient package)
-                    //.AddGrpcClientInstrumentation()
+                    .AddGrpcClientInstrumentation()
                     .AddHttpClientInstrumentation();
             });
 
@@ -104,6 +108,40 @@ public static class Extensions
             .AddCheck("self", () => HealthCheckResult.Healthy(), ["live"]);
 
         return builder;
+    }
+
+    public static WebApplication UseCorrelationId(this WebApplication app)
+    {
+        app.Use(async (context, next) =>
+        {
+            var correlationId = GetOrCreateCorrelationId(context);
+
+            context.Items[CorrelationIdItemName] = correlationId;
+            context.Response.Headers[CorrelationIdHeaderName] = correlationId;
+
+            using (app.Logger.BeginScope(new Dictionary<string, object>
+            {
+                ["CorrelationId"] = correlationId
+            }))
+            {
+                await next(context);
+            }
+        });
+
+        return app;
+    }
+
+    private static string GetOrCreateCorrelationId(HttpContext context)
+    {
+        if (context.Request.Headers.TryGetValue(CorrelationIdHeaderName, out StringValues values))
+        {
+            var incomingCorrelationId = values.FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(incomingCorrelationId))
+            {
+                return incomingCorrelationId;
+            }
+        }
+        return Guid.CreateVersion7().ToString("N");
     }
 
     public static WebApplication MapDefaultEndpoints(this WebApplication app)

@@ -9,6 +9,8 @@ builder.Services.AddGrpc();
 
 var app = builder.Build();
 
+app.UseCorrelationId();
+
 app.MapDefaultEndpoints();
 app.MapGrpcService<InventoryGrpcService>();
 

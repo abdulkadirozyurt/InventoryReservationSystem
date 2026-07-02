@@ -13,7 +13,7 @@ Goal: keep order management and inventory reservation separate, then connect the
 - `InventoryService.API` exposes a gRPC service with stubbed success responses.
 - .NET Aspire AppHost exists for API orchestration only.
 - Docker Compose exists for both APIs, MongoDB replica-set startup, Redis, and RedisInsight.
-- ServiceDefaults provides basic OpenTelemetry hooks, service discovery, HTTP resilience defaults, and development-only `/health` and `/alive` endpoints.
+- ServiceDefaults provides shared OpenTelemetry configuration, gRPC client instrumentation, service discovery, HTTP resilience defaults, CorrelationId middleware, and development-only `/health` and `/alive` endpoints.
 - Tests are not present yet.
 - Prometheus, Loki, Tempo, Grafana, detailed readiness checks, real Mongo/Redis usage, and real business logic are still roadmap items.
 
@@ -219,10 +219,6 @@ Current focus is Phase 1: infrastructure, protocols, and observability setup.
 
 Open Phase 1 work:
 
-- Complete Docker Compose infrastructure baseline.
-- Finish gRPC contracts for reservation, release, stock lookup, and future operations.
-- Generate and wire C# gRPC stubs cleanly for both services.
-- Complete shared ServiceDefaults for OpenTelemetry and correlation tracking.
 - Add detailed liveness/readiness health checks for MongoDB, Redis, and cross-service gRPC dependencies.
 
 Later phases:
