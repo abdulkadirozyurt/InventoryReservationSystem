@@ -15,6 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\InventoryReservationSystem.ServiceDefaults\InventoryReservationSystem.ServiceDefaults.csproj" />
     <ProjectReference Include="..\..\..\contracts\InventoryReservationSystem.Contracts\InventoryReservationSystem.Contracts.csproj" />
+    <ProjectReference Include="..\OrderService.Infrastructure\OrderService.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

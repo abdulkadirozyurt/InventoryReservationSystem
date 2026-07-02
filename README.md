@@ -171,10 +171,13 @@ InventoryReservationSystem/
 docker compose up --build
 ```
 
+Docker Compose runs services with `ASPNETCORE_ENVIRONMENT=Production` and uses the base `appsettings.json` files.
+
 Published ports from `docker-compose.yml`:
 
 - OrderService API: `http://localhost:5041`
-- InventoryService API/gRPC HTTP endpoint: `http://localhost:5032`
+- InventoryService HTTP health/OpenAPI endpoint: `http://localhost:5032`
+- InventoryService gRPC endpoint: `http://localhost:5081`
 - MongoDB: `localhost:27017`
 - Redis: `localhost:6379`
 - RedisInsight: `http://localhost:5540`
@@ -215,11 +218,14 @@ When running `OrderService.API` outside Docker/AppHost, ensure `InventoryService
 
 ## Roadmap / current focus
 
-Current focus is Phase 1: infrastructure, protocols, and observability setup.
+Phase 1 infrastructure, protocols, and observability setup is complete.
 
-Open Phase 1 work:
+Health checks:
 
-- Add detailed liveness/readiness health checks for MongoDB, Redis, and cross-service gRPC dependencies.
+- `/health` reports liveness.
+- `/health/ready` reports readiness with dependency-level JSON details.
+- InventoryService readiness checks MongoDB and Redis.
+- OrderService readiness checks MongoDB, Redis, and InventoryService reachability.
 
 Later phases:
 

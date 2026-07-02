@@ -29,4 +29,4 @@ limits_config:
   allow_structured_metadata: true
 
 pattern_ingester:
-  enabled: true
+  enabled: false

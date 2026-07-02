@@ -166,13 +166,13 @@ Update this file when a service boundary, communication pattern, or structural c
   - Her iki serviste de geçerli olacak küresel OpenTelemetry konfigürasyonu yapıldı.
   - gRPC client instrumentation ServiceDefaults üzerinden etkinleştirildi.
   - İstekler arası geçişlerde (REST -> gRPC) `CorrelationId` takibini yapacak katman entegre edildi.
-- [ ] **Adım 1.5: Detaylı Health Check Altyapısı**
+- [x] **Adım 1.5: Detaylı Health Check Altyapısı**
   - Her iki serviste `/health` (liveness) ve `/health/ready` (readiness) endpoint'leri kurulacak.
   - Readiness check'i servis bağımlılıklarını (MongoDB bağlantısı, Redis bağlantısı, karşı taraftaki gRPC servisi) ayrı ayrı raporlayacak şekilde tasarlanacak — tek "ok/fail" değil, her bağımlılık için ayrı durum dönecek.
 
 ### Live Project State
 
-- [ ] **Phase 1:** Altyapı, Protokoller ve İzlenebilirlik Kurulumu
+- [x] **Phase 1:** Altyapı, Protokoller ve İzlenebilirlik Kurulumu
 - [ ] **Phase 2:** InventoryService Veri Modeli ve Dağıtık Kilit (Lock) Altyapısı
 - [ ] **Phase 3:** InventoryService gRPC İş Mantığının Geliştirilmesi
 - [ ] **Phase 4:** OrderService Sipariş Yönetimi ve Dirençli (Resilient) Entegrasyonlar

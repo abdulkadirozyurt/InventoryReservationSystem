@@ -1,15 +1,14 @@
+using OpenTelemetry;
 using System.Text.Json;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using OpenTelemetry.Trace;
+using OpenTelemetry.Metrics;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
-using Microsoft.Extensions.ServiceDiscovery;
-using OpenTelemetry;
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Trace;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -19,7 +18,7 @@ namespace Microsoft.Extensions.Hosting;
 public static class Extensions
 {
     private const string HealthEndpointPath = "/health";
-    private const string AlivenessEndpointPath = "/health/ready";
+    private const string ReadinessEndpointPath = "/health/ready";
     public const string CorrelationIdHeaderName = "X-Correlation-ID";
     public const string CorrelationIdItemName = "CorrelationId";
 
@@ -71,7 +70,7 @@ public static class Extensions
                         // Exclude health check requests from tracing
                         tracing.Filter = context =>
                             !context.Request.Path.StartsWithSegments(HealthEndpointPath)
-                            && !context.Request.Path.StartsWithSegments(AlivenessEndpointPath)
+                            && !context.Request.Path.StartsWithSegments(ReadinessEndpointPath)
                     )
                     // Uncomment the following line to enable gRPC instrumentation (requires the OpenTelemetry.Instrumentation.GrpcNetClient package)
                     .AddGrpcClientInstrumentation()
@@ -136,22 +135,22 @@ public static class Extensions
     {
         // Adding health checks endpoints to applications in non-development environments has security implications.
         // See https://aka.ms/dotnet/aspire/healthchecks for details before enabling these endpoints in non-development environments.
-        if (app.Environment.IsDevelopment())
+        // Only health checks tagged with the "live" tag must pass for app to be considered alive
+        app.MapHealthChecks(HealthEndpointPath, new HealthCheckOptions
         {
-            // All health checks must pass for app to be considered ready to accept traffic after starting
-            app.MapHealthChecks(HealthEndpointPath);
+            Predicate = r => r.Tags.Contains("live"),
+            ResponseWriter = WriteHealthCheckResponse
+        });
 
-            // Only health checks tagged with the "live" tag must pass for app to be considered alive
-            app.MapHealthChecks(AlivenessEndpointPath, new HealthCheckOptions
-            {
-                Predicate = r => r.Tags.Contains("live"),
-                ResponseWriter = WriteHealthCheckResponse
-            });
-        }
+        // All readiness checks must pass for app to be considered ready to accept traffic
+        app.MapHealthChecks(ReadinessEndpointPath, new HealthCheckOptions
+        {
+            Predicate = r => !r.Tags.Contains("live"),
+            ResponseWriter = WriteHealthCheckResponse
+        });
 
         return app;
     }
-
 
     private static string GetOrCreateCorrelationId(HttpContext context)
     {
