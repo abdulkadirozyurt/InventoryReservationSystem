@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Http;
@@ -18,7 +19,7 @@ namespace Microsoft.Extensions.Hosting;
 public static class Extensions
 {
     private const string HealthEndpointPath = "/health";
-    private const string AlivenessEndpointPath = "/alive";
+    private const string AlivenessEndpointPath = "/health/ready";
     public const string CorrelationIdHeaderName = "X-Correlation-ID";
     public const string CorrelationIdItemName = "CorrelationId";
 
@@ -131,6 +132,27 @@ public static class Extensions
         return app;
     }
 
+    public static WebApplication MapDefaultEndpoints(this WebApplication app)
+    {
+        // Adding health checks endpoints to applications in non-development environments has security implications.
+        // See https://aka.ms/dotnet/aspire/healthchecks for details before enabling these endpoints in non-development environments.
+        if (app.Environment.IsDevelopment())
+        {
+            // All health checks must pass for app to be considered ready to accept traffic after starting
+            app.MapHealthChecks(HealthEndpointPath);
+
+            // Only health checks tagged with the "live" tag must pass for app to be considered alive
+            app.MapHealthChecks(AlivenessEndpointPath, new HealthCheckOptions
+            {
+                Predicate = r => r.Tags.Contains("live"),
+                ResponseWriter = WriteHealthCheckResponse
+            });
+        }
+
+        return app;
+    }
+
+
     private static string GetOrCreateCorrelationId(HttpContext context)
     {
         if (context.Request.Headers.TryGetValue(CorrelationIdHeaderName, out StringValues values))
@@ -144,22 +166,25 @@ public static class Extensions
         return Guid.CreateVersion7().ToString("N");
     }
 
-    public static WebApplication MapDefaultEndpoints(this WebApplication app)
+    private static async Task WriteHealthCheckResponse(HttpContext context, HealthReport report)
     {
-        // Adding health checks endpoints to applications in non-development environments has security implications.
-        // See https://aka.ms/dotnet/aspire/healthchecks for details before enabling these endpoints in non-development environments.
-        if (app.Environment.IsDevelopment())
+        context.Response.ContentType = "application/json";
+
+        var response = new
         {
-            // All health checks must pass for app to be considered ready to accept traffic after starting
-            app.MapHealthChecks(HealthEndpointPath);
-
-            // Only health checks tagged with the "live" tag must pass for app to be considered alive
-            app.MapHealthChecks(AlivenessEndpointPath, new HealthCheckOptions
+            status = report.Status.ToString(),
+            duration = report.TotalDuration.ToString(),
+            checks = report.Entries.Select(entry => new
             {
-                Predicate = r => r.Tags.Contains("live")
-            });
-        }
+                name = entry.Key,
+                status = entry.Value.Status.ToString(),
+                description = entry.Value.Description,
+                duration = entry.Value.Duration.ToString(),
+                error = entry.Value.Exception?.Message
+            })
+        };
 
-        return app;
+        await context.Response.WriteAsync(JsonSerializer.Serialize(response));
     }
 }
+
