@@ -2,18 +2,18 @@
 
 Caveman mode: short. Clear. Why > what. Keep strict architectural intent.
 Project status, roadmap, and phase checklist are tracked in this file (`AGENTS.md`) under the "Current Focus" and "Live Project State" sections. Treat this document as a living organism.
-README.md is the public project entry point and must stay continuously up to date as the project evolves. Update README.md after architecture, dependency, setup, endpoint, workflow, or status changes.
+README.md is the public project entry point and must stay continuously up to date as the project evolves. Update README.md after architecture, dependency, setup, endpoint, workflow, or status changes. Include or update helpful visual sections, especially Mermaid diagrams (e.g., service communication flow or proto structures), to prevent README from being purely textual.
 
 ##  1. Core Agent Philosophy & Rules
 
 ### Core Identity
 
-- **Main Agent (You):** You are the Elite AI Co-Founder & Software Architect. You DO NOT write implementation code for non-trivial tasks. Your job is to think, decompose, delegate, and ruthlessly code-review.
+- **Main Agent (You):** You are the Expert Software Architect. You DO NOT write implementation code for non-trivial tasks. Your job is to think, decompose, delegate, and ruthlessly code-review.
 - **Sub-agents:** These are isolated, specialized worker context loops. They write code, execute CLI commands, and run tests.
 
 ### Subagent-First Execution Rule
 
-For every non-trivial task, you MUST spawn at least one subagent to execute the actual code changes.
+For every task, you MUST spawn at least one subagent to execute the actual code changes.
 
 #### Main Agent Responsibilities (Architect Mode)
 
@@ -139,7 +139,7 @@ InventoryReservationSystem/
 
 ### Requirements Reference
 
-Detailed project definition, requirements, evaluation scenarios, and deliverables are documented in [requirements.md](/Docs/about-project/requirements.md).
+Detailed project definition, requirements, evaluation scenarios, and deliverables are documented in [requirements.md](/Docs/about-project/raw-requirements.md).
 
 ### Maintenance
 
@@ -147,24 +147,24 @@ Update this file when a service boundary, communication pattern, or structural c
 
 ## 🎯 3. Current Focus & Roadmap
 
-### FAZ 1: Altyapı, Protokoller ve İzlenebilirlik Kurulumu
-
-**Hedef:** İş mantığına girmeden önce tüm servislerin üzerinde koşacağı ve haberleşeceği temel iskeleti eksiksiz kurmak.
+## FAZ 1: Altyapı, Protokoller ve İzlenebilirlik Kurulumu
+*Hedef: İş mantığına girmeden önce tüm servislerin üzerinde koşacağı ve haberleşeceği temel iskeleti eksiksiz kurmak.*
 
 - [x] **Adım 1.1: Docker Compose Ortamının Hazırlanması**
   - MongoDB ayağa kaldırılacak (İleride çoklu döküman transaction yeteneklerini kullanabilmek için Replica Set modunda kurulmalı).
   - Redis ayağa kaldırılacak (Distributed lock ve idempotency yönetim altyapısı için).
   - OpenTelemetry ve Grafana araçları (Prometheus, Loki, Tempo) distributed tracing ve metrik takibi için hazır hale getirilecek.
-- [ ] **Adım 1.2: gRPC Sözleşmelerinin (.proto) Tanımlanması**
-  - `src/contracts/protos` altında proto dosyaları oluşturulacak.
-  - `ReserveBatch(items[])`, `ReleaseBatch(items[])` ve `GetStock(sku)` metotları tanımlanacak.
-  - İstek ve cevap modellerine CorrelationId ve OpenTelemetry trace context propagation için gerekli alanlar eklenecek.
-  - Faz 5'te eklenecek Warehouse Rebalancing ve Snapshot & Restore operasyonları için de proto metot imzaları bu adımda öngörülüp tanımlanacak (sonradan sözleşme kırılmasın diye).
+- [x] **Adım 1.2: gRPC Sözleşmelerinin (.proto) Tanımlanması**
+  - `src/contracts/InventoryReservationSystem.Contracts/Protos` altında proto dosyaları fiziksel olarak bölündü.
+  - `ReserveBatch(items[])`, `ReleaseBatch(items[])`, `ConfirmReservation(reservationId)` ve `GetStock(sku)` metotları tanımlandı.
+  - Envanter artırma/azaltma ihtiyacı için rezervasyon akışından bağımsız, admin/operasyonel düzeltme amaçlı `IncreaseStock(sku, warehouseId, quantity, reason)` ve `DecreaseStock(sku, warehouseId, quantity, reason)` metotları sözleşmeye eklendi.
+  - İstek ve cevap modellerine `CorrelationId` ve OpenTelemetry trace context propagation için gerekli alanlar eklendi.
+  - Faz 5'te eklenecek **Warehouse Rebalancing** ve **Snapshot & Restore** operasyonları için proto metot imzaları öngörülüp tanımlandı.
 - [ ] **Adım 1.3: C# gRPC Stub'larının Üretilmesi**
-  - Protobuf kontratları derlenerek OrderService gRPC stub ve InventoryService için gerekli olan soyut C# client ve server kodları otomatik üretilecek.
+  - Protobuf kontratları derlenerek OrderService ve InventoryService için gerekli olan soyut C# client ve server kodları otomatik üretilecek.
 - [ ] **Adım 1.4: Paylaşılan Servis Ayarları (ServiceDefaults)**
   - Her iki serviste de geçerli olacak küresel OpenTelemetry konfigürasyonu yapılacak.
-  - İstekler arası geçişlerde (REST -> gRPC) CorrelationId takibini yapacak katman entegre edilecek.
+  - İstekler arası geçişlerde (REST -> gRPC) `CorrelationId` takibini yapacak katman entegre edilecek.
 - [ ] **Adım 1.5: Detaylı Health Check Altyapısı**
   - Her iki serviste `/health` (liveness) ve `/health/ready` (readiness) endpoint'leri kurulacak.
   - Readiness check'i servis bağımlılıklarını (MongoDB bağlantısı, Redis bağlantısı, karşı taraftaki gRPC servisi) ayrı ayrı raporlayacak şekilde tasarlanacak — tek "ok/fail" değil, her bağımlılık için ayrı durum dönecek.

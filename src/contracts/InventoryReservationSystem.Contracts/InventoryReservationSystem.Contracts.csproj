@@ -17,7 +17,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="Protos\inventory.proto" GrpcServices="Both" />
+    <Protobuf Include="Protos\inventory_common.proto" GrpcServices="None" ProtoRoot="Protos" />
+    <Protobuf Include="Protos\inventory_reservations.proto" GrpcServices="None" ProtoRoot="Protos" />
+    <Protobuf Include="Protos\inventory_stock.proto" GrpcServices="None" ProtoRoot="Protos" />
+    <Protobuf Include="Protos\inventory_operations.proto" GrpcServices="None" ProtoRoot="Protos" />
+    <Protobuf Include="Protos\inventory.proto" GrpcServices="Both" ProtoRoot="Protos" />
   </ItemGroup>
 
 </Project>

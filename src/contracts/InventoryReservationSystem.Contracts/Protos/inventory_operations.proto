@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+option csharp_namespace = "InventoryReservationSystem.Contracts.Inventory";
+
+package inventory.v1;
+
+import "inventory_common.proto";
+
+// -----------------------------------------------------------------------------
+// Future operational messages
+// -----------------------------------------------------------------------------
+
+// RebalanceWarehouseRequest: Faz 5 için depo arası stok taşıma/dengelenme isteği.
+message RebalanceWarehouseRequest {
+  RequestMetadata metadata = 1;
+
+  // sku: Taşınacak ürün kodu.
+  string sku = 2;
+
+  // source_warehouse_id: Stokların düşüleceği kaynak depo.
+  string source_warehouse_id = 3;
+
+  // target_warehouse_id: Stokların aktarılacağı hedef depo.
+  string target_warehouse_id = 4;
+
+  int32 quantity = 5;
+}
+
+// RebalanceWarehouseResponse: Depo dengeleme işleminin sonucu.
+message RebalanceWarehouseResponse {
+  ResponseMetadata metadata = 1;
+  bool success = 2;
+  string error_code = 3;
+  string error_message = 4;
+}
+
+// CreateInventorySnapshotRequest: Faz 5 için envanter snapshot alma isteği.
+message CreateInventorySnapshotRequest {
+  RequestMetadata metadata = 1;
+
+  // requested_by: Operasyonu başlatan kullanıcı/sistem bilgisi.
+  string requested_by = 2;
+}
+
+// CreateInventorySnapshotResponse: Snapshot alma işleminin sonucu.
+message CreateInventorySnapshotResponse {
+  ResponseMetadata metadata = 1;
+  bool success = 2;
+  string snapshot_id = 3;
+  string error_code = 4;
+  string error_message = 5;
+}
+
+// RestoreInventorySnapshotRequest: Faz 5 için snapshot'tan geri yükleme isteği.
+message RestoreInventorySnapshotRequest {
+  RequestMetadata metadata = 1;
+  string snapshot_id = 2;
+  string requested_by = 3;
+}
+
+// RestoreInventorySnapshotResponse: Snapshot geri yükleme işleminin sonucu.
+message RestoreInventorySnapshotResponse {
+  ResponseMetadata metadata = 1;
+  bool success = 2;
+  string error_code = 3;
+  string error_message = 4;
+}

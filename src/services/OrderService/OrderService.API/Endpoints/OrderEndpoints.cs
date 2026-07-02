@@ -1,4 +1,4 @@
-﻿using InventoryReservationSystem.Contracts.Inventory;
+using InventoryReservationSystem.Contracts.Inventory;
 using Microsoft.AspNetCore.Http.HttpResults;
 
 namespace OrderService.API.Endpoints;
@@ -12,19 +12,19 @@ public static class OrderEndpoints
         group.MapPost("/", CreateOrderAsync)
             .WithName("CreateOrder");
 
-
         return app;
-
     }
-
-
 
     private static async Task<IResult> CreateOrderAsync(
         CreateOrderRequest request,
         InventoryReservations.InventoryReservationsClient inventoryClient)
     {
-        var reserveRequest = new ReserveInventoryRequest
+        var reserveRequest = new ReserveBatchRequest
         {
+            Metadata = new RequestMetadata
+            {
+                CorrelationId = Guid.CreateVersion7().ToString("N")
+            },
             OrderId = Guid.CreateVersion7().ToString("N")
         };
 
@@ -34,14 +34,11 @@ public static class OrderEndpoints
             Quantity = item.Quantity
         }));
 
-        var reserveResponse = await inventoryClient.ReserveAsync(reserveRequest);
+        var reserveResponse = await inventoryClient.ReserveBatchAsync(reserveRequest);
 
         return Results.Ok(new CreateOrderResponse(reserveResponse.Success, reserveResponse.ReservationId));
     }
 }
-
-
-
 
 public sealed record CreateOrderRequest(IReadOnlyList<CreateOrderItemRequest> Items);
 

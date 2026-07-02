@@ -4,45 +4,46 @@ option csharp_namespace = "InventoryReservationSystem.Contracts.Inventory";
 
 package inventory.v1;
 
+import "inventory_reservations.proto";
+import "inventory_stock.proto";
+import "inventory_operations.proto";
+
+// -----------------------------------------------------------------------------
+// Inventory gRPC service contract
+// -----------------------------------------------------------------------------
+
+// Bu dosya ana gRPC servis giriş noktasıdır.
+// Request/response message tanımları sorumluluklarına göre ayrı proto dosyalarına bölündü:
+//   inventory_common.proto        -> ortak metadata ve ortak modeller
+//   inventory_reservations.proto  -> rezervasyon mesajları
+//   inventory_stock.proto         -> stok sorgusu ve stok düzeltme mesajları
+//   inventory_operations.proto    -> operasyon mesajları
+
+// service: gRPC servisinin dış dünyaya açtığı metotları gruplar.
+// OrderService bu metotları client olarak çağırır, InventoryService server olarak uygular.
 service InventoryReservations {
-  rpc Reserve (ReserveInventoryRequest) returns (ReserveInventoryResponse);
-  rpc Confirm (ConfirmReservationRequest) returns (ConfirmReservationResponse);
-  rpc Release (ReleaseReservationRequest) returns (ReleaseReservationResponse);
-}
+  // rpc: Remote Procedure Call. Yani başka serviste çalışan metodu ağ üzerinden çağırmak.
+  // ReserveBatch: Birden fazla SKU'yu tek atomic batch içinde rezerve etmeyi ister.
+  rpc ReserveBatch (ReserveBatchRequest) returns (ReserveBatchResponse);
 
-message ReserveInventoryRequest {
-  string order_id = 1;
-  repeated ReservationItem items = 2;
-}
+  // ReleaseBatch: Daha önce alınmış rezervasyonu toplu şekilde serbest bırakmayı ister.
+  rpc ReleaseBatch (ReleaseBatchRequest) returns (ReleaseBatchResponse);
 
-message ReservationItem {
-  string sku = 1;
-  int32 quantity = 2;
-}
+  // ConfirmReservation: Rezervasyonu kesinleştirir.
+  rpc ConfirmReservation (ConfirmReservationRequest) returns (ConfirmReservationResponse);
 
-message ReserveInventoryResponse {
-  bool success = 1;
-  string reservation_id = 2;
-  repeated ReservationFailure failures = 3;
-}
+  // GetStock: Tek SKU için anlık stok bilgisini ister.
+  rpc GetStock (GetStockRequest) returns (GetStockResponse);
 
-message ReservationFailure {
-  string sku = 1;
-  string reason = 2;
-}
+  // IncreaseStock: Tek SKU için stoğu artırmayı ister.
+  rpc IncreaseStock(IncreaseStockRequest) returns (StockAdjustmentResponse);
 
-message ConfirmReservationRequest {
-  string reservation_id = 1;
-}
+  // DecreaseStock: Tek SKU için stoğu azaltmayı ister.
+  rpc DecreaseStock(DecreaseStockRequest) returns (StockAdjustmentResponse);
 
-message ConfirmReservationResponse {
-  bool success = 1;
-}
-
-message ReleaseReservationRequest {
-  string reservation_id = 1;
-}
-
-message ReleaseReservationResponse {
-  bool success = 1;
+  // Aşağıdaki metotlar Faz 5 için şimdiden sözleşmeye eklenen imzalardır.
+  // Bu adımda sadece contract var; iş mantığı daha sonra yazılacak.
+  rpc RebalanceWarehouse (RebalanceWarehouseRequest) returns (RebalanceWarehouseResponse);
+  rpc CreateInventorySnapshot (CreateInventorySnapshotRequest) returns (CreateInventorySnapshotResponse);
+  rpc RestoreInventorySnapshot (RestoreInventorySnapshotRequest) returns (RestoreInventorySnapshotResponse);
 }

@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+option csharp_namespace = "InventoryReservationSystem.Contracts.Inventory";
+
+package inventory.v1;
+
+import "inventory_common.proto";
+
+// -----------------------------------------------------------------------------
+// Reservation operations
+// -----------------------------------------------------------------------------
+
+// ReserveBatchRequest: OrderService'in InventoryService'e gönderdiği toplu rezervasyon isteği.
+message ReserveBatchRequest {
+  // metadata: Request takip bilgileri. Her request'te field 1 olarak tutulur.
+  RequestMetadata metadata = 1;
+
+  // order_id: Bu rezervasyonu isteyen order'ın kimliği.
+  string order_id = 2;
+
+  // repeated: Liste/dizi anlamına gelir.
+  // Burada request içinde birden fazla ReservationItem gönderilebilir.
+  // Bu yüzden metot adı ReserveBatch: tek ürün değil, ürün listesi rezerve eder.
+  repeated ReservationItem items = 3;
+}
+
+// ReserveBatchResponse: Toplu rezervasyon isteğinin sonucu.
+message ReserveBatchResponse {
+  ResponseMetadata metadata = 1;
+
+  // bool: true/false veri tipi. İşlem başarılı mı?
+  bool success = 2;
+
+  // reservation_id: Başarılı rezervasyonun kimliği. Sonra confirm/release bu id ile yapılır.
+  string reservation_id = 3;
+
+  // failures: Başarısızsa SKU bazlı hata detayları.
+  repeated ReservationFailure failures = 4;
+}
+
+// ReleaseBatchRequest: Rezervasyonu serbest bırakma isteği.
+message ReleaseBatchRequest {
+  RequestMetadata metadata = 1;
+
+  // reservation_id: Serbest bırakılacak rezervasyonun kimliği.
+  string reservation_id = 2;
+
+  // items: Hangi SKU/miktarların release edileceğini açıkça taşır.
+  // ReleaseBatch(items[]) requirement'ını karşılar.
+  repeated ReservationItem items = 3;
+}
+
+// ReleaseBatchResponse: Release işleminin sonucu.
+message ReleaseBatchResponse {
+  ResponseMetadata metadata = 1;
+  bool success = 2;
+  string error_code = 3;
+  string error_message = 4;
+}
+
+// ConfirmReservationRequest: Rezervasyonu kesinleştirme isteği.
+message ConfirmReservationRequest {
+  RequestMetadata metadata = 1;
+
+  // reservation_id: Kesinleştirilecek rezervasyon kimliği.
+  string reservation_id = 2;
+}
+
+// ConfirmReservationResponse: Confirm işleminin sonucu.
+message ConfirmReservationResponse {
+  ResponseMetadata metadata = 1;
+  bool success = 2;
+  string error_code = 3;
+  string error_message = 4;
+}

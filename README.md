@@ -8,7 +8,7 @@ Goal: keep order management and inventory reservation separate, then connect the
 
 - Phase: early infrastructure/prototype.
 - Two API services exist: `OrderService.API` and `InventoryService.API`.
-- Shared gRPC contract project exists and generates C# stubs from `inventory.proto`.
+- Shared gRPC contract project exists and generates C# stubs from physically split proto files under `src/contracts/InventoryReservationSystem.Contracts/Protos`.
 - `OrderService.API` exposes a minimal order creation endpoint and calls `InventoryService.API` over gRPC.
 - `InventoryService.API` exposes a gRPC service with stubbed success responses.
 - .NET Aspire AppHost exists for API orchestration only.
@@ -26,6 +26,17 @@ The repository follows a service-oriented Clean Architecture shape:
 - Services communicate through gRPC contracts in `src/contracts/InventoryReservationSystem.Contracts`.
 - Domain/Application/Infrastructure projects exist for both services, but most business logic is not implemented yet.
 - `OrderService` must not access InventoryService-owned MongoDB collections or Redis state directly. Inventory operations go through gRPC.
+
+```mermaid
+flowchart LR
+    Client[Client] -->|REST POST /api/orders| OrderAPI[OrderService.API]
+    OrderAPI -->|gRPC ReserveBatch| InventoryAPI[InventoryService.API]
+    InventoryAPI -. future .-> Mongo[(MongoDB)]
+    InventoryAPI -. future .-> Redis[(Redis locks)]
+    OrderAPI -. future .-> OrderDb[(MongoDB orders)]
+```
+
+> Solid arrows show current service calls. Dotted arrows show planned persistence/locking work; real MongoDB/Redis business logic is not implemented yet.
 
 ## Service boundaries
 
@@ -54,9 +65,33 @@ Current responsibility:
 
 Current gRPC methods:
 
-- `Reserve`
-- `Confirm`
-- `Release`
+- `ReserveBatch`
+- `ReleaseBatch`
+- `ConfirmReservation`
+- `GetStock`
+- `IncreaseStock`
+- `DecreaseStock`
+- `RebalanceWarehouse` (Phase 5 signature only)
+- `CreateInventorySnapshot` (Phase 5 signature only)
+- `RestoreInventorySnapshot` (Phase 5 signature only)
+
+Proto files:
+
+- `inventory.proto`: main gRPC service entry file.
+- `inventory_common.proto`: shared metadata, reservation item, and failure messages.
+- `inventory_reservations.proto`: reservation request/response messages.
+- `inventory_stock.proto`: stock lookup and stock adjustment messages.
+- `inventory_operations.proto`: warehouse rebalancing and snapshot/restore messages.
+
+```mermaid
+flowchart TD
+    inventory["inventory.proto\nservice InventoryReservations"] --> reservations["inventory_reservations.proto\nReserveBatch / ReleaseBatch / ConfirmReservation"]
+    inventory --> stock["inventory_stock.proto\nGetStock / IncreaseStock / DecreaseStock"]
+    inventory --> operations["inventory_operations.proto\nRebalance / Snapshot / Restore"]
+    reservations --> common["inventory_common.proto\nmetadata / shared messages"]
+    stock --> common
+    operations --> common
+```
 
 Current limitation:
 

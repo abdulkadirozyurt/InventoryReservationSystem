@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+option csharp_namespace = "InventoryReservationSystem.Contracts.Inventory";
+
+package inventory.v1;
+
+// -----------------------------------------------------------------------------
+// Common metadata and shared messages
+// -----------------------------------------------------------------------------
+
+// message: Protobuf veri modeli. C# tarafında class gibi üretilir.
+//
+// Field number açıklaması:
+//   string sku = 1;
+// satırındaki "1" değer değildir. sku içine 1 yazılmaz.
+// Bu sayı protobuf'un binary formatta alanı tanımak için kullandığı kalıcı etikettir.
+// Alan adını insanlar okur, field number değerini protobuf okur.
+//
+// JSON gibi metin formatında alan adı görünür:
+//   { "sku": "SKU-001" }
+//
+// Protobuf binary formatta ise alan adını sürekli yazmak yerine field number kullanır:
+//   field 1 => "SKU-001"
+//
+// Bu yüzden field number'lar kontrat oturduktan sonra değiştirilmez.
+// Değişirse eski client/server aynı binary veriyi yanlış okuyabilir.
+
+// RequestMetadata: Her request içinde taşınacak ortak takip bilgileri.
+message RequestMetadata {
+  // correlation_id: Uygulama/log takip kimliği.
+  // Aynı işleme ait farklı servis loglarını bulmak için kullanılır.
+  // Örnek: OrderService ve InventoryService loglarında aynı correlation_id aranabilir.
+  string correlation_id = 1;
+
+  // trace_id: Distributed tracing'de tüm request yolculuğunun kimliği.
+  // Örnek yolculuk: HTTP POST /orders -> gRPC ReserveBatch -> Redis lock -> Mongo update.
+  // Grafana Tempo gibi araçlarda tüm zincir bu id altında görünür.
+  string trace_id = 2;
+
+  // span_id: Trace içindeki tek adımın kimliği.
+  // trace_id bütün hikaye; span_id hikayedeki tek sahne.
+  // Örnek: Sadece gRPC ReserveBatch çağrısı bir span olabilir.
+  string span_id = 3;
+
+  // trace_parent: W3C Trace Context standardındaki ana header değeri.
+  // Servisler arası trace zincirinin kopmadan devam etmesini sağlar.
+  string trace_parent = 4;
+
+  // trace_state: Vendor/tool özel trace bilgileri için ek W3C header alanı.
+  // Çoğu basit senaryoda boş olabilir.
+  string trace_state = 5;
+}
+
+// ResponseMetadata: Her response içinde dönecek ortak takip bilgileri.
+message ResponseMetadata {
+  // correlation_id: Request'ten gelen uygulama/log takip kimliği response'ta da döner.
+  string correlation_id = 1;
+
+  // trace_id: Grafana/Tempo tarafında ilgili trace'i bulmayı kolaylaştırır.
+  // correlation_id bizim log takip numaramızdır; trace_id observability zincir numarasıdır.
+  string trace_id = 2;
+}
+
+// ReservationItem: Batch içindeki tek ürün satırı.
+message ReservationItem {
+  // string: Metin veri tipi.
+  // sku: Stok kodu. Örnek: SKU-001.
+  string sku = 1;
+
+  // int32: 32-bit tam sayı. Quantity için yeterli ve sade.
+  int32 quantity = 2;
+
+  // warehouse_id: Multi-warehouse için opsiyonel alan. Şimdilik boş kalabilir.
+  string warehouse_id = 3;
+}
+
+// ReservationFailure: Batch başarısız olduğunda hangi SKU neden başarısız oldu bilgisini taşır.
+message ReservationFailure {
+  string sku = 1;
+  string reason = 2;
+
+  // error_code: Makine tarafından okunabilir hata kodu.
+  // Örnek: INSUFFICIENT_STOCK, SKU_NOT_FOUND, VALIDATION_ERROR.
+  string error_code = 3;
+}
