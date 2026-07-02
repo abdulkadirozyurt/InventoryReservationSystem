@@ -4,7 +4,7 @@ Caveman mode: short. Clear. Why > what. Keep strict architectural intent.
 Project status, roadmap, and phase checklist are tracked in this file (`AGENTS.md`) under the "Current Focus" and "Live Project State" sections. Treat this document as a living organism.
 README.md is the public project entry point and must stay continuously up to date as the project evolves. Update README.md after architecture, dependency, setup, endpoint, workflow, or status changes. Include or update helpful visual sections, especially Mermaid diagrams (e.g., service communication flow or proto structures), to prevent README from being purely textual.
 
-##  1. Core Agent Philosophy & Rules
+## 1. Core Agent Philosophy & Rules
 
 ### Core Identity
 
@@ -13,7 +13,7 @@ README.md is the public project entry point and must stay continuously up to dat
 
 ### Subagent-First Execution Rule
 
-For every task, you MUST spawn at least one subagent to execute the actual code changes or inspect files or another thing. 
+For every task, you MUST spawn at least one subagent to execute the actual code changes or inspect files or another thing.
 
 #### Main Agent Responsibilities (Architect Mode)
 
@@ -117,7 +117,6 @@ InventoryReservationSystem/
 └── README.md
 ```
 
-
 ### Service Communication & Rules
 
 - **OrderService** is the public entry point and exposes REST endpoints for creating, reading, confirming, and cancelling orders.
@@ -147,28 +146,29 @@ Update this file when a service boundary, communication pattern, or structural c
 
 ## 🎯 3. Current Focus & Roadmap
 
-## FAZ 1: Altyapı, Protokoller ve İzlenebilirlik Kurulumu
-*Hedef: İş mantığına girmeden önce tüm servislerin üzerinde koşacağı ve haberleşeceği temel iskeleti eksiksiz kurmak.*
+## FAZ 2: InventoryService Veri Modeli ve Dağıtık Kilit (Lock) Altyapısı
 
-- [x] **Adım 1.1: Docker Compose Ortamının Hazırlanması**
-  - MongoDB ayağa kaldırılacak (İleride çoklu döküman transaction yeteneklerini kullanabilmek için Replica Set modunda kurulmalı).
-  - Redis ayağa kaldırılacak (Distributed lock ve idempotency yönetim altyapısı için).
-  - OpenTelemetry ve Grafana araçları (Prometheus, Loki, Tempo) distributed tracing ve metrik takibi için hazır hale getirilecek.
-- [x] **Adım 1.2: gRPC Sözleşmelerinin (.proto) Tanımlanması**
-  - `src/contracts/InventoryReservationSystem.Contracts/Protos` altında proto dosyaları fiziksel olarak bölündü.
-  - `ReserveBatch(items[])`, `ReleaseBatch(items[])`, `ConfirmReservation(reservationId)` ve `GetStock(sku)` metotları tanımlandı.
-  - Envanter artırma/azaltma ihtiyacı için rezervasyon akışından bağımsız, admin/operasyonel düzeltme amaçlı `IncreaseStock(sku, warehouseId, quantity, reason)` ve `DecreaseStock(sku, warehouseId, quantity, reason)` metotları sözleşmeye eklendi.
-  - İstek ve cevap modellerine `CorrelationId` ve OpenTelemetry trace context propagation için gerekli alanlar eklendi.
-  - Faz 5'te eklenecek **Warehouse Rebalancing** ve **Snapshot & Restore** operasyonları için proto metot imzaları öngörülüp tanımlandı.
-- [x] **Adım 1.3: C# gRPC Stub'larının Üretilmesi**
-  - Protobuf kontratları derlenerek OrderService ve InventoryService için gerekli olan soyut C# client ve server kodları otomatik üretilecek.
-- [x] **Adım 1.4: Paylaşılan Servis Ayarları (ServiceDefaults)**
-  - Her iki serviste de geçerli olacak küresel OpenTelemetry konfigürasyonu yapıldı.
-  - gRPC client instrumentation ServiceDefaults üzerinden etkinleştirildi.
-  - İstekler arası geçişlerde (REST -> gRPC) `CorrelationId` takibini yapacak katman entegre edildi.
-- [x] **Adım 1.5: Detaylı Health Check Altyapısı**
-  - Her iki serviste `/health` (liveness) ve `/health/ready` (readiness) endpoint'leri kurulacak.
-  - Readiness check'i servis bağımlılıklarını (MongoDB bağlantısı, Redis bağlantısı, karşı taraftaki gRPC servisi) ayrı ayrı raporlayacak şekilde tasarlanacak — tek "ok/fail" değil, her bağımlılık için ayrı durum dönecek.
+_Hedef: Envanterin mutlak doğruluğunu koruyacak veri katmanını ve deadlock (kilitlenme) önleme mekanizmasını kurmak._
+
+- [ ] **Adım 2.1: Envanter Veri Modelinin Kurulması (MongoDB)**
+  - `InventoryItems` koleksiyonu kurulacak: `sku`, `warehouseId`, `quantityAvailable` ve `quantityReserved` alanlarını içerecek.
+  - SKU ve depo bazlı stok ayrımı için `{ sku, warehouseId }` üzerinde bileşik benzersiz indeks tanımlanacak.
+  - Veritabanı seviyesinde her SKU+depo kaydı için `quantityAvailable >= 0` ve `quantityReserved >= 0` validasyon kuralları eklenecek (Asla eksiye düşmemeli).
+  - `Reservations` koleksiyonu kurulacak: `reservationId`, `orderId`, `items[]` (`sku`, `warehouseId`, `quantity`), `status` (`Pending`, `Confirmed`, `Released`, `Expired`), `createdAt`, `expiresAt` ve `updatedAt` alanlarını içerecek.
+  - Expiration job, confirm ve release akışları OrderService veritabanına doğrudan erişmeden bu dahili `Reservations` koleksiyonu üzerinden çalışacak.
+- [ ] **Adım 2.2: Envanter İşlem Günlüğü (Transaction Log / Audit Trail)**
+  - Tüm envanter hareketlerini timestamp, correlation id, reservation id/order id ve işlem nedeni ile kayıt altına alacak ayrı bir MongoDB koleksiyonu kurulacak.
+  - Hareket tipleri açıkça ayrılacak:
+    - `Reserve`: `quantityAvailable -= n`, `quantityReserved += n`.
+    - `Release`: `quantityReserved -= n`, `quantityAvailable += n`.
+    - `Confirm`: `quantityReserved -= n`; `quantityAvailable` geri artırılmaz, stok kalıcı olarak tüketilmiş sayılır.
+    - `AdjustStock`: admin/operasyonel stok artırma veya azaltma; `reason` zorunlu olacak.
+    - `Rebalance`: depolar arası stok transferi.
+    - `SnapshotRestore`: snapshot geri yükleme kaynaklı düzeltme hareketi.
+- [ ] **Adım 2.3: Deterministik Dağıtık Kilit (Redis Lock) Altyapısı**
+  - Redis tabanlı distributed lock mekanizması kodlanacak.
+  - **Kritik Kural:** Gelen batch içerisindeki SKU+depo (`sku`, `warehouseId`) anahtarları işlenmeden önce **alfabetik/deterministik sıraya** dizilecek. Kilitler her zaman bu deterministik sırayla edinilecek (Deadlock girişimlerini tamamen engellemek için). Bu kural hem aynı SKU seti hem de kesişen farklı SKU/depo setleri içeren eş zamanlı batch'ler için geçerli olacak; sıralama garantisi tekil SKU değil, batch'ler arası kesişim senaryosunu da kapsayacak.
+  - Her lock için bir **maksimum tutulma süresi (lock TTL)** tanımlanacak; bu süreyi aşan lock'lar "stuck lock" olarak işaretlenip loglanacak (Adım 3.6 ile ilişkili).
 
 ### Live Project State
 
