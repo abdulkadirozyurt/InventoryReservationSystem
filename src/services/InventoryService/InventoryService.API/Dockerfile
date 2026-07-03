@@ -7,6 +7,8 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY ["InventoryReservationSystem.ServiceDefaults/InventoryReservationSystem.ServiceDefaults.csproj", "InventoryReservationSystem.ServiceDefaults/"]
 COPY ["src/contracts/InventoryReservationSystem.Contracts/InventoryReservationSystem.Contracts.csproj", "src/contracts/InventoryReservationSystem.Contracts/"]
+COPY ["src/services/InventoryService/InventoryService.Domain/InventoryService.Domain.csproj", "src/services/InventoryService/InventoryService.Domain/"]
+COPY ["src/services/InventoryService/InventoryService.Application/InventoryService.Application.csproj", "src/services/InventoryService/InventoryService.Application/"]
 COPY ["src/services/InventoryService/InventoryService.Infrastructure/InventoryService.Infrastructure.csproj", "src/services/InventoryService/InventoryService.Infrastructure/"]
 COPY ["src/services/InventoryService/InventoryService.API/InventoryService.API.csproj", "src/services/InventoryService/InventoryService.API/"]
 RUN dotnet restore "src/services/InventoryService/InventoryService.API/InventoryService.API.csproj"

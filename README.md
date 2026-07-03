@@ -2,7 +2,7 @@
 
 Inventory Reservation System is an early-stage .NET microservice prototype for reserving stock for orders.
 
-Goal: keep order management and inventory reservation separate, then connect them through gRPC. Current code is infrastructure/prototype level. Core persistence, distributed locking, expiry, idempotency, and real reservation rules are not complete yet.
+Goal: keep order management and inventory reservation separate, then connect them through gRPC. Current code is infrastructure/prototype level. MongoDB collection schemas and technical logging are in place; distributed locking, expiry, idempotency, and real reservation rules are not complete yet.
 
 ## Current status
 
@@ -11,6 +11,8 @@ Goal: keep order management and inventory reservation separate, then connect the
 - Shared gRPC contract project exists and generates C# stubs from physically split proto files under `src/contracts/InventoryReservationSystem.Contracts/Protos`.
 - `OrderService.API` exposes a minimal order creation endpoint and calls `InventoryService.API` over gRPC.
 - `InventoryService.API` exposes a gRPC service with stubbed success responses.
+- InventoryService initializes MongoDB schemas for `InventoryItems`, `Reservations`, and `InventoryTransactions` with validation rules and indexes.
+- InventoryService writes technical logs through Serilog to console and MongoDB `ApplicationLogs`.
 - .NET Aspire AppHost exists for API orchestration only.
 - Docker Compose exists for both APIs, MongoDB replica-set startup, Redis, and RedisInsight.
 - ServiceDefaults provides shared OpenTelemetry configuration, gRPC client instrumentation, service discovery, HTTP resilience defaults, CorrelationId middleware, and development-only `/health` and `/alive` endpoints.
@@ -61,6 +63,8 @@ Current limitation:
 Current responsibility:
 
 - Host the `InventoryReservations` gRPC service.
+- Initialize MongoDB collections for inventory items, reservations, and inventory transaction history.
+- Write technical application logs through Serilog.
 - Return placeholder success responses for reservation operations.
 
 Current gRPC methods:

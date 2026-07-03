@@ -1,8 +1,11 @@
+using InventoryService.API.Extensions;
 using InventoryService.API.Grpc;
 using InventoryService.Infrastructure;
 using InventoryService.Infrastructure.Mongo;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseInventorySerilog();
 
 builder.AddServiceDefaults();
 

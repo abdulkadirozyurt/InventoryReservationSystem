@@ -156,15 +156,12 @@ _Hedef: Envanterin mutlak doğruluğunu koruyacak veri katmanını ve deadlock (
   - Veritabanı seviyesinde her SKU+depo kaydı için `quantityAvailable >= 0` ve `quantityReserved >= 0` validasyon kuralları eklenecek (Asla eksiye düşmemeli).
   - `Reservations` koleksiyonu kurulacak: `reservationId`, `orderId`, `items[]` (`sku`, `warehouseId`, `quantity`), `status` (`Pending`, `Confirmed`, `Released`, `Expired`), `createdAt`, `expiresAt` ve `updatedAt` alanlarını içerecek.
   - Expiration job, confirm ve release akışları OrderService veritabanına doğrudan erişmeden bu dahili `Reservations` koleksiyonu üzerinden çalışacak.
-- [ ] **Adım 2.2: Envanter İşlem Günlüğü (Transaction Log / Audit Trail)**
-  - Tüm envanter hareketlerini timestamp, correlation id, reservation id/order id ve işlem nedeni ile kayıt altına alacak ayrı bir MongoDB koleksiyonu kurulacak.
-  - Hareket tipleri açıkça ayrılacak:
-    - `Reserve`: `quantityAvailable -= n`, `quantityReserved += n`.
-    - `Release`: `quantityReserved -= n`, `quantityAvailable += n`.
-    - `Confirm`: `quantityReserved -= n`; `quantityAvailable` geri artırılmaz, stok kalıcı olarak tüketilmiş sayılır.
-    - `AdjustStock`: admin/operasyonel stok artırma veya azaltma; `reason` zorunlu olacak.
-    - `Rebalance`: depolar arası stok transferi.
-    - `SnapshotRestore`: snapshot geri yükleme kaynaklı düzeltme hareketi.
+- [x] **Adım 2.2: Envanter İşlem Günlüğü (Transaction Log / Audit Trail)**
+  - `InventoryTransactions` koleksiyonu timestamp, correlation id, reservation id/order id, işlem nedeni ve stok delta alanlarıyla kuruldu.
+  - `Reserve`, `Release`, `Confirm`, `AdjustStock`, `Rebalance` ve `SnapshotRestore` hareket tipleri domain modeli ve MongoDB validasyonu seviyesinde ayrıldı.
+  - SKU+depo+createdAt, correlation id, reservation id ve order id indeksleri oluşturuldu.
+  - Serilog teknik log altyapısı `ApplicationLogs` koleksiyonuna yazacak şekilde yapılandırıldı.
+  - Not: Runtime envanter akışları henüz audit kaydı yazmıyor; bu entegrasyon Reserve/Release/Confirm iş mantığı geliştirilirken yapılacak.
 - [ ] **Adım 2.3: Deterministik Dağıtık Kilit (Redis Lock) Altyapısı**
   - Redis tabanlı distributed lock mekanizması kodlanacak.
   - **Kritik Kural:** Gelen batch içerisindeki SKU+depo (`sku`, `warehouseId`) anahtarları işlenmeden önce **alfabetik/deterministik sıraya** dizilecek. Kilitler her zaman bu deterministik sırayla edinilecek (Deadlock girişimlerini tamamen engellemek için). Bu kural hem aynı SKU seti hem de kesişen farklı SKU/depo setleri içeren eş zamanlı batch'ler için geçerli olacak; sıralama garantisi tekil SKU değil, batch'ler arası kesişim senaryosunu da kapsayacak.
