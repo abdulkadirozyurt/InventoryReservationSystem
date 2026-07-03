@@ -2,11 +2,13 @@ namespace InventoryService.Infrastructure.Mongo;
 
 public sealed class MongoCollectionInitializer(
     InventoryItemsCollectionInitializer inventoryItemsInitializer,
-    ReservationsCollectionInitializer reservationsInitializer)
+    ReservationsCollectionInitializer reservationsInitializer,
+    InventoryTransactionsCollectionInitializer inventoryTransactionsInitializer)
 {
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         await inventoryItemsInitializer.InitializeAsync(cancellationToken);
         await reservationsInitializer.InitializeAsync(cancellationToken);
+        await inventoryTransactionsInitializer.InitializeAsync(cancellationToken);
     }
 }

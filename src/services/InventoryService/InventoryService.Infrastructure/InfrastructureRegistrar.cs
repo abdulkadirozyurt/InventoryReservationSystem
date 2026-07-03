@@ -33,6 +33,7 @@ public static class InfrastructureRegistrar
 
         services.AddSingleton<InventoryItemsCollectionInitializer>();
         services.AddSingleton<ReservationsCollectionInitializer>();
+        services.AddSingleton<InventoryTransactionsCollectionInitializer>();
         services.AddSingleton<MongoCollectionInitializer>();
 
         services.AddHealthChecks()
