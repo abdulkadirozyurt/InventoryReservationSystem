@@ -7,8 +7,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Folder Include="Reservations\" />
-    <Folder Include="Reservations\Abstractions\" />
     <Folder Include="Reservations\Commands\" />
   </ItemGroup>
 

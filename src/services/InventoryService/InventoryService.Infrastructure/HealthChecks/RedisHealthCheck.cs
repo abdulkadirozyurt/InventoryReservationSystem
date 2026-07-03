@@ -1,16 +1,17 @@
-using Microsoft.Extensions.Configuration;
+using InventoryService.Infrastructure.Redis;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 
 namespace InventoryService.Infrastructure.HealthChecks;
 
-internal sealed class RedisHealthCheck(IConfiguration configuration) : IHealthCheck
+internal sealed class RedisHealthCheck(IOptions<RedisOptions> redisOptions) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken = default)
     {
-        var connectionString = configuration.GetConnectionString("Redis");
+        var connectionString = redisOptions.Value.ConnectionString;
         if (string.IsNullOrWhiteSpace(connectionString))
         {
             return HealthCheckResult.Unhealthy("Redis connection string is missing.");
