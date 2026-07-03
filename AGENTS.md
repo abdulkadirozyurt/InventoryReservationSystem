@@ -150,7 +150,7 @@ Update this file when a service boundary, communication pattern, or structural c
 
 _Hedef: Envanterin mutlak doğruluğunu koruyacak veri katmanını ve deadlock (kilitlenme) önleme mekanizmasını kurmak._
 
-- [ ] **Adım 2.1: Envanter Veri Modelinin Kurulması (MongoDB)**
+- [x] **Adım 2.1: Envanter Veri Modelinin Kurulması (MongoDB)**
   - `InventoryItems` koleksiyonu kurulacak: `sku`, `warehouseId`, `quantityAvailable` ve `quantityReserved` alanlarını içerecek.
   - SKU ve depo bazlı stok ayrımı için `{ sku, warehouseId }` üzerinde bileşik benzersiz indeks tanımlanacak.
   - Veritabanı seviyesinde her SKU+depo kaydı için `quantityAvailable >= 0` ve `quantityReserved >= 0` validasyon kuralları eklenecek (Asla eksiye düşmemeli).

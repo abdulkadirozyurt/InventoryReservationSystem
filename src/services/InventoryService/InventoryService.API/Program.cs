@@ -1,5 +1,6 @@
 using InventoryService.API.Grpc;
 using InventoryService.Infrastructure;
+using InventoryService.Infrastructure.Mongo;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +12,9 @@ builder.Services.AddGrpc();
 builder.Services.AddInfrastructureServices(builder.Configuration);
 
 var app = builder.Build();
+
+// Initialize MongoDB collections with rules
+await app.Services.GetRequiredService<MongoCollectionInitializer>().InitializeAsync();
 
 app.UseCorrelationId();
 

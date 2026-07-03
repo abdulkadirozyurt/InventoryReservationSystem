@@ -31,12 +31,12 @@ The repository follows a service-oriented Clean Architecture shape:
 flowchart LR
     Client[Client] -->|REST POST /api/orders| OrderAPI[OrderService.API]
     OrderAPI -->|gRPC ReserveBatch| InventoryAPI[InventoryService.API]
-    InventoryAPI -. future .-> Mongo[(MongoDB)]
+    InventoryAPI ---> Mongo[(MongoDB)]
     InventoryAPI -. future .-> Redis[(Redis locks)]
     OrderAPI -. future .-> OrderDb[(MongoDB orders)]
 ```
 
-> Solid arrows show current service calls. Dotted arrows show planned persistence/locking work; real MongoDB/Redis business logic is not implemented yet.
+> Solid arrows show active service calls and databases. Dotted arrows show planned persistence/locking work; Redis locking and Order database integration are not fully implemented yet.
 
 ## Service boundaries
 
@@ -95,7 +95,7 @@ flowchart TD
 
 Current limitation:
 
-- No stock model, MongoDB persistence, Redis locking, expiry, release idempotency, or real availability checks are implemented yet.
+- MongoDB persistence schemas (`InventoryItems`, `Reservations`) are initialized with validation constraints and unique indexes, but Redis locking, reservation expiry worker, release idempotency, and real availability checks are not fully integrated yet.
 
 ## Tech stack
 
