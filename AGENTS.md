@@ -38,6 +38,7 @@ When reviewing a sub-agent's output, the Main Agent must reject the work immedia
 1. **Inward Dependencies Only:** `Domain` must have zero dependencies. `Application` depends only on `Domain`. `Infrastructure` and `API` depend on `Application`.
 2. **Service Isolation:** `OrderService` must NEVER access MongoDB collections or Redis instances owned by `InventoryService`. All interaction must go through gRPC.
 3. **Resilience & Tracking:** Every network/gRPC call must propagate the `CorrelationId` and context, and must be wrapped in Polly resilience policies (Retry, Circuit Breaker).
+4. **Polly Scope Discipline:** Proje genelinde retry, timeout, circuit breaker ve rate limit gibi resilience ihtiyaçları uygun olduğunda Polly pipeline ile modellenmelidir. Polly stratejisi senaryoya göre seçilmelidir: retry/timeout transient dependency hataları ve kontrollü beklemeler için; circuit breaker gerçek dış bağımlılık arızaları için; rate limit ise giriş/çıkış trafiğini sınırlamak için kullanılmalıdır. Normal business contention durumları (ör. Redis lock contention) circuit breaker açma sebebi sayılmamalıdır.
 
 ### 🔀 Task Decomposition & Concurrency Rules
 
@@ -135,6 +136,15 @@ InventoryReservationSystem/
 - Work in small, testable units; avoid opportunistic multi-file changes.
 - When introducing a new protocol or pattern (e.g. a new gRPC contract, a new concurrency strategy), state the concept explicitly rather than assuming it's known.
 - When proposing code, contrast a naive approach with the correct one and explain why the naive one fails (concurrency, transaction boundaries, performance, etc.).
+
+### Logging & Audit Trail Rules
+
+- **Structured Serilog Only:** Proje genelindeki tüm teknik uygulama logları Serilog üzerinden structured logging olarak yazılmalıdır.
+- **Message Template Zorunlu:** Log mesajları message template ve named property kullanmalıdır; string interpolation (`$"..."`) veya manuel string birleştirme kullanılmamalıdır.
+  - _Yanlış:_ `_logger.LogInformation($"Order {orderId} processed.");`
+  - _Doğru:_ `_logger.LogInformation("Order {OrderId} processed.", orderId);`
+- **Context Zorunlu:** Runtime loglarda mümkün olduğunca `CorrelationId`, `OrderId`, `ReservationId`, `Sku`, `WarehouseId`, `LockKey`, `ElapsedMs` ve hata kategorisi gibi aranabilir alanlar named property olarak taşınmalıdır.
+- **Audit Trail Ayrı Kayıttır:** Audit trail kayıtları (`InventoryTransactions`, `OrderHistory` vb.) teknik log değildir; domain davranışını kanıtlayan kalıcı veri kayıtlarıdır ve ilgili runtime akışıyla birlikte yazılmalıdır.
 
 ### Requirements Reference
 
