@@ -156,31 +156,53 @@ Update this file when a service boundary, communication pattern, or structural c
 
 ## 🎯 3. Current Focus & Roadmap
 
-## FAZ 2: InventoryService Veri Modeli ve Dağıtık Kilit (Lock) Altyapısı
+## FAZ 3: InventoryService gRPC İş Mantığının Geliştirilmesi
+*Hedef: All-or-nothing prensibine sahip atomik rezervasyon motorunu inşa etmek.*
 
-_Hedef: Envanterin mutlak doğruluğunu koruyacak veri katmanını ve deadlock (kilitlenme) önleme mekanizmasını kurmak._
-
-- [x] **Adım 2.1: Envanter Veri Modelinin Kurulması (MongoDB)**
-  - `InventoryItems` koleksiyonu kurulacak: `sku`, `warehouseId`, `quantityAvailable` ve `quantityReserved` alanlarını içerecek.
-  - SKU ve depo bazlı stok ayrımı için `{ sku, warehouseId }` üzerinde bileşik benzersiz indeks tanımlanacak.
-  - Veritabanı seviyesinde her SKU+depo kaydı için `quantityAvailable >= 0` ve `quantityReserved >= 0` validasyon kuralları eklenecek (Asla eksiye düşmemeli).
-  - `Reservations` koleksiyonu kurulacak: `reservationId`, `orderId`, `items[]` (`sku`, `warehouseId`, `quantity`), `status` (`Pending`, `Confirmed`, `Released`, `Expired`), `createdAt`, `expiresAt` ve `updatedAt` alanlarını içerecek.
-  - Expiration job, confirm ve release akışları OrderService veritabanına doğrudan erişmeden bu dahili `Reservations` koleksiyonu üzerinden çalışacak.
-- [x] **Adım 2.2: Envanter İşlem Günlüğü (Transaction Log / Audit Trail)**
-  - `InventoryTransactions` koleksiyonu timestamp, correlation id, reservation id/order id, işlem nedeni ve stok delta alanlarıyla kuruldu.
-  - `Reserve`, `Release`, `Confirm`, `AdjustStock`, `Rebalance` ve `SnapshotRestore` hareket tipleri domain modeli ve MongoDB validasyonu seviyesinde ayrıldı.
-  - SKU+depo+createdAt, correlation id, reservation id ve order id indeksleri oluşturuldu.
-  - Serilog teknik log altyapısı `ApplicationLogs` koleksiyonuna yazacak şekilde yapılandırıldı.
-  - Not: Runtime envanter akışları henüz audit kaydı yazmıyor; bu entegrasyon Reserve/Release/Confirm iş mantığı geliştirilirken yapılacak.
-- [ ] **Adım 2.3: Deterministik Dağıtık Kilit (Redis Lock) Altyapısı**
-  - Redis tabanlı distributed lock mekanizması kodlanacak.
-  - **Kritik Kural:** Gelen batch içerisindeki SKU+depo (`sku`, `warehouseId`) anahtarları işlenmeden önce **alfabetik/deterministik sıraya** dizilecek. Kilitler her zaman bu deterministik sırayla edinilecek (Deadlock girişimlerini tamamen engellemek için). Bu kural hem aynı SKU seti hem de kesişen farklı SKU/depo setleri içeren eş zamanlı batch'ler için geçerli olacak; sıralama garantisi tekil SKU değil, batch'ler arası kesişim senaryosunu da kapsayacak.
-  - Her lock için bir **maksimum tutulma süresi (lock TTL)** tanımlanacak; bu süreyi aşan lock'lar "stuck lock" olarak işaretlenip loglanacak (Adım 3.6 ile ilişkili).
+- [ ] **Adım 3.1: GetStock(sku) Metodunun Yazılması**
+  - Verilen SKU'ya ait güncel envanter durumunu dönen servis kodu yazılacak.
+  - `warehouseId` verilirse tek depo, boş verilirse SKU'nun toplam/genel stok görünümü dönecek şekilde davranış netleştirilecek.
+  - Stok sorgularında correlation id ile technical log üretilecek; bulunamayan SKU/depo, geçersiz istek ve transient Mongo hataları ayrı kategorilerle loglanacak.
+- [ ] **Adım 3.2: ReserveBatch(items[]) Metodunun Yazılması (All-or-Nothing)**
+  - Deterministik SKU+depo kilit sırasına göre Redis üzerinde kilitler edinilecek.
+  - Batch içerisindeki tüm ürünlerin stokları kontrol edilecek. **Eğer tek bir ürünün bile stoku yetersizse, işlem anında iptal edilecek**, edinilen kilitler serbest bırakılacak ve hata dönülecek (Kısmi rezervasyona izin yok).
+  - Tüm ürünlerin stoku yeterliyse, ilgili miktarlar `quantityAvailable` alanından düşülüp `quantityReserved` alanına atomik olarak eklenecek.
+  - Başarılı işlemde `Reservations` koleksiyonuna `Pending` durumunda, `expiresAt = createdAt + 10 dakika` olacak şekilde rezervasyon kaydı yazılacak.
+  - Başarılı rezervasyonlarda `InventoryTransactions` koleksiyonuna `Reserve` audit kaydı yazılacak.
+  - Stok yetersizliği, lock timeout, transaction rollback, cancellation ve transient Mongo/Redis hataları correlation id ile technical log olarak yazılacak.
+  - Aynı SKU'ları veya kesişen SKU/depo setlerini hedefleyen eş zamanlı batch'lerin, lock sırası sayesinde birbirini bekleyip sırayla işlenmesi ve hiçbirinin overbooking'e yol açmaması garanti altına alınacak.
+- [ ] **Adım 3.3: ReleaseBatch(items[]) Metodunun Yazılması**
+  - Aynı deterministik SKU+depo kilit sırasını kullanarak rezervasyonları serbest bırakacak (Stoku geri iade edecek) metot yazılacak.
+  - `Release` hareketinde `quantityReserved` azaltılacak ve `quantityAvailable` aynı miktarda artırılacak.
+  - `Reservations` kaydı `Released` veya expiry akışından geliyorsa `Expired` durumuna geçirilecek.
+  - Başarılı release/expiry işlemlerinde `InventoryTransactions` koleksiyonuna `Release` audit kaydı yazılacak.
+  - Duplicate/idempotent release denemeleri, release edilmeyen rezervasyonlar, lock timeout ve transient hatalar correlation id ile loglanacak.
+  - **İdempotent Kontrol:** Aynı rezervasyonun ikinci kez release edilmesi Redis ve/veya `Reservations.status` üzerinden kontrol edilerek engellenecek.
+- [ ] **Adım 3.4: ConfirmReservation(reservationId) Metodunun Yazılması**
+  - `reservationId` ile dahili `Reservations` kaydı bulunacak ve durumun `Pending` olduğu doğrulanacak.
+  - Rezervasyon içindeki SKU+depo anahtarları deterministik sırayla lock edilecek.
+  - Confirm işleminde yalnızca `quantityReserved` azaltılacak; `quantityAvailable` geri artırılmayacak.
+  - Rezervasyon `Confirmed` durumuna geçirilecek ve transaction log'a `Confirm` hareketi yazılacak.
+  - Başarılı confirm işlemlerinde `InventoryTransactions` koleksiyonuna `Confirm` audit kaydı yazılacak.
+  - Duplicate confirm, geçersiz reservation state, lock timeout ve transient hatalar correlation id ile loglanacak.
+  - Aynı rezervasyonun tekrar confirm edilmesi idempotent kabul edilecek; duplicate confirm stok miktarını ikinci kez değiştirmeyecek.
+- [ ] **Adım 3.5: AdjustStock(sku, warehouseId, delta, reason) Metodunun Yazılması**
+  - Bu metot sadece admin/operasyonel envanter düzeltmeleri için kullanılacak; order rezervasyon akışının parçası olmayacak.
+  - İlgili SKU+depo anahtarı deterministik lock ile korunacak.
+  - `delta` pozitifse stok artırma, negatifse stok azaltma yapılacak; işlem sonrası `quantityAvailable` ve `quantityReserved` negatif olamayacak.
+  - `reason` zorunlu tutulacak ve her işlem transaction log'a `AdjustStock` hareketi olarak yazılacak.
+  - Her `AdjustStock` işleminde reason, correlation id, SKU/depo ve stok delta bilgisiyle `InventoryTransactions` audit kaydı yazılacak.
+  - Negatif stok engeli, validation failure, lock timeout ve admin düzeltmeleri technical log olarak yazılacak.
+- [ ] **Adım 3.6: Metriklerin Enjeksiyonu ve Log Sınıflandırması**
+  - Önceki adımlarda eklenen lock, reservation, release, confirm, adjust stock ve hata logları OpenTelemetry metrikleriyle ilişkilendirilecek.
+  - Lock contention, lock ownership süresi, timeout sayısı ve transient/sistemsel hata ayrımı metrik olarak üretilecek.
+  - Adım 2.3'te tanımlanan lock TTL aşımları ayrı bir metrik/log olarak işaretlenecek (**"beklenenden uzun tutulan lock" tespiti**).
+  - Bu adım feature loglarını ilk kez eklemek için değil, mevcut runtime sinyallerini ölçülebilir hale getirmek için kullanılacak.
 
 ### Live Project State
 
 - [x] **Phase 1:** Altyapı, Protokoller ve İzlenebilirlik Kurulumu
-- [ ] **Phase 2:** InventoryService Veri Modeli ve Dağıtık Kilit (Lock) Altyapısı
+- [x] **Phase 2:** InventoryService Veri Modeli ve Dağıtık Kilit (Lock) Altyapısı
 - [ ] **Phase 3:** InventoryService gRPC İş Mantığının Geliştirilmesi
 - [ ] **Phase 4:** OrderService Sipariş Yönetimi ve Dirençli (Resilient) Entegrasyonlar
 - [ ] **Phase 5:** Otomatik Süre Aşımı (Expiry) ve Gelişmiş Operasyonel Özellikler

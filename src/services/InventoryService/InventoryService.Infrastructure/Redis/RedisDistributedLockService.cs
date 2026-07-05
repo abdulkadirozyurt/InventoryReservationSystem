@@ -1,11 +1,15 @@
 ﻿using InventoryService.Application.Reservations.Abstractions;
+using Microsoft.Extensions.Logging;
 using Polly;
 using Polly.Retry;
 using StackExchange.Redis;
 
 namespace InventoryService.Infrastructure.Redis;
 
-public sealed class RedisDistributedLockService(IConnectionMultiplexer connectionMultiplexer) : IDistributedLockService
+public sealed class RedisDistributedLockService(
+    IConnectionMultiplexer connectionMultiplexer,
+    ILogger<RedisDistributedLockService> logger,
+    ILoggerFactory loggerFactory) : IDistributedLockService
 {
     private readonly IDatabase _database = connectionMultiplexer.GetDatabase();
 
@@ -22,6 +26,7 @@ public sealed class RedisDistributedLockService(IConnectionMultiplexer connectio
     {
         var acquiredLockKeys = new List<string>();
         var lockToken = Guid.NewGuid().ToString("N"); // Generate a unique lock token for this lock acquisition.
+        var lockHandleLogger = loggerFactory.CreateLogger<RedisDistributedLockHandle>();
 
         try
         {
@@ -46,21 +51,35 @@ public sealed class RedisDistributedLockService(IConnectionMultiplexer connectio
                 acquiredLockKeys.Add(lockKey);
             }
 
-            return new RedisDistributedLockHandle(_database, lockToken, acquiredLockKeys);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            // If we fail to acquire the lock for any key, we need to release all previously acquired locks.
-            if (acquiredLockKeys.Count > 0)
-                await new RedisDistributedLockHandle(_database, lockToken, acquiredLockKeys).DisposeAsync();
+            logger.LogDebug(RedisLogMessages.DistributedLockAcquired, acquiredLockKeys.Count);
 
-            throw new TimeoutException("Could not acquire distributed lock within the configured timeout.");
+            return new RedisDistributedLockHandle(_database, lockToken, acquiredLockKeys, lockHandleLogger);
         }
-        catch
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
             // If we fail to acquire the lock for any key, we need to release all previously acquired locks.
             if (acquiredLockKeys.Count > 0)
-                await new RedisDistributedLockHandle(_database, lockToken, acquiredLockKeys).DisposeAsync();
+                await new RedisDistributedLockHandle(_database, lockToken, acquiredLockKeys, lockHandleLogger).DisposeAsync();
+
+            logger.LogWarning(
+                RedisLogMessages.DistributedLockAcquisitionTimedOut,
+                acquireTimeout.TotalMilliseconds,
+                lockKeys.Count,
+                acquiredLockKeys.Count);
+
+            throw new TimeoutException("Could not acquire distributed lock within the configured timeout.", exception);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                RedisLogMessages.DistributedLockAcquisitionFailed,
+                lockKeys.Count,
+                acquiredLockKeys.Count);
+
+            // If we fail to acquire the lock for any key, we need to release all previously acquired locks.
+            if (acquiredLockKeys.Count > 0)
+                await new RedisDistributedLockHandle(_database, lockToken, acquiredLockKeys, lockHandleLogger).DisposeAsync();
 
             throw;
         }

@@ -2,7 +2,7 @@
 
 Inventory Reservation System is an early-stage .NET microservice prototype for reserving stock for orders.
 
-Goal: keep order management and inventory reservation separate, then connect them through gRPC. Current code is infrastructure/prototype level. MongoDB collection schemas and technical logging are in place; distributed locking, expiry, idempotency, and real reservation rules are not complete yet.
+Goal: keep order management and inventory reservation separate, then connect them through gRPC. Current code is infrastructure/prototype level. MongoDB collection schemas, technical logging, and Redis distributed lock infrastructure are in place; expiry, idempotency, and real reservation rules are not complete yet.
 
 ## Current status
 
@@ -12,6 +12,7 @@ Goal: keep order management and inventory reservation separate, then connect the
 - `OrderService.API` exposes a minimal order creation endpoint and calls `InventoryService.API` over gRPC.
 - `InventoryService.API` exposes a gRPC service with stubbed success responses.
 - InventoryService initializes MongoDB schemas for `InventoryItems`, `Reservations`, and `InventoryTransactions` with validation rules and indexes.
+- InventoryService has Redis distributed lock infrastructure with deterministic lock ordering, Polly retry, lock TTL, safe token-based release, and structured Serilog lock logs.
 - InventoryService writes technical logs through Serilog to console and MongoDB `ApplicationLogs`.
 - .NET Aspire AppHost exists for API orchestration only.
 - Docker Compose exists for both APIs, MongoDB replica-set startup, Redis, and RedisInsight.
@@ -34,11 +35,11 @@ flowchart LR
     Client[Client] -->|REST POST /api/orders| OrderAPI[OrderService.API]
     OrderAPI -->|gRPC ReserveBatch| InventoryAPI[InventoryService.API]
     InventoryAPI ---> Mongo[(MongoDB)]
-    InventoryAPI -. future .-> Redis[(Redis locks)]
+    InventoryAPI -->|distributed locks| Redis[(Redis)]
     OrderAPI -. future .-> OrderDb[(MongoDB orders)]
 ```
 
-> Solid arrows show active service calls and databases. Dotted arrows show planned persistence/locking work; Redis locking and Order database integration are not fully implemented yet.
+> Solid arrows show active service calls, databases, and infrastructure integrations. Order database integration and real reservation business rules are not fully implemented yet.
 
 ## Service boundaries
 
@@ -65,6 +66,7 @@ Current responsibility:
 - Host the `InventoryReservations` gRPC service.
 - Initialize MongoDB collections for inventory items, reservations, and inventory transaction history.
 - Write technical application logs through Serilog.
+- Provide Redis distributed lock infrastructure for future reservation flows.
 - Return placeholder success responses for reservation operations.
 
 Current gRPC methods:
@@ -99,7 +101,7 @@ flowchart TD
 
 Current limitation:
 
-- MongoDB persistence schemas (`InventoryItems`, `Reservations`) are initialized with validation constraints and unique indexes, but Redis locking, reservation expiry worker, release idempotency, and real availability checks are not fully integrated yet.
+- MongoDB persistence schemas (`InventoryItems`, `Reservations`) and Redis distributed lock infrastructure are initialized, but reservation expiry worker, release idempotency, real availability checks, and gRPC business logic integration are not complete yet.
 
 ## Tech stack
 
@@ -109,6 +111,8 @@ Current limitation:
 - .NET Aspire AppHost and ServiceDefaults
 - OpenTelemetry packages via ServiceDefaults
 - Microsoft HTTP resilience defaults via ServiceDefaults
+- Polly for Redis lock acquisition retry and future resilience policies
+- Serilog for structured technical logging
 - Scalar for API reference in `OrderService.API`
 - Docker Compose
 - MongoDB 8.2.11 configured to start as a single-node replica set
@@ -222,7 +226,7 @@ When running `OrderService.API` outside Docker/AppHost, ensure `InventoryService
 
 ## Roadmap / current focus
 
-Phase 1 infrastructure, protocols, and observability setup is complete.
+Phase 1 infrastructure, protocols, and observability setup is complete. Phase 2 InventoryService MongoDB data model, audit collection setup, and Redis distributed lock infrastructure are complete.
 
 Health checks:
 
@@ -233,7 +237,6 @@ Health checks:
 
 Later phases:
 
-- Inventory data model and distributed Redis locking.
 - Real InventoryService reservation logic.
 - OrderService order lifecycle and resilient gRPC integration.
 - Reservation expiry and operational workflows.

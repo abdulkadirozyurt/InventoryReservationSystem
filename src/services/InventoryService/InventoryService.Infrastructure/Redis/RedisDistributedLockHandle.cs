@@ -1,4 +1,5 @@
 ﻿using InventoryService.Application.Reservations.Abstractions;
+using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
 namespace InventoryService.Infrastructure.Redis;
@@ -8,7 +9,8 @@ namespace InventoryService.Infrastructure.Redis;
 internal sealed class RedisDistributedLockHandle(
     IDatabase database,
     string lockToken,
-    IReadOnlyCollection<string> lockKeys) : IDistributedLockHandle
+    IReadOnlyCollection<string> lockKeys,
+    ILogger<RedisDistributedLockHandle> logger) : IDistributedLockHandle
 {
     public IReadOnlyCollection<string> LockKeys => lockKeys;
 
@@ -16,8 +18,20 @@ internal sealed class RedisDistributedLockHandle(
     public async ValueTask DisposeAsync()
     {
         foreach (var key in LockKeys.Reverse())
-        {            
-            await database.LockReleaseAsync(key, lockToken);
+        {
+            try
+            {
+                var released = await database.LockReleaseAsync(key, lockToken);
+
+                if (!released)
+                {
+                    logger.LogWarning(RedisLogMessages.DistributedLockReleaseSkipped, key);
+                }
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, RedisLogMessages.DistributedLockReleaseFailed, key);
+            }
         }
     }
 }
