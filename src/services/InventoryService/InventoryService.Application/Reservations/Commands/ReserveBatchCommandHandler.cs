@@ -1,13 +1,18 @@
-﻿using InventoryService.Application.Reservations.Results;
+﻿using InventoryService.Application.Inventory.Abstractions;
+using InventoryService.Application.Reservations.Abstractions;
+using InventoryService.Application.Reservations.Results;
 using Microsoft.Extensions.Logging;
 
 namespace InventoryService.Application.Reservations.Commands;
 
-public sealed class ReserveBatchCommandHandler(ILogger<ReserveBatchCommandHandler> logger)
+public sealed class ReserveBatchCommandHandler(
+    IInventoryUnitOfWork unitOfWork,
+    IDistributedLockService distributedLockService,
+    ILogger<ReserveBatchCommandHandler> logger)
 {
     private const string ValidationFailure = "VALIDATION_ERROR";
 
-    public Task<ReserveBatchResult> HandleAsync(ReserveBatchCommand request, CancellationToken cancellationToken)
+    public async Task<ReserveBatchResult> HandleAsync(ReserveBatchCommand request, CancellationToken cancellationToken)
     {
         var failures = Validate(request);
 
@@ -18,10 +23,17 @@ public sealed class ReserveBatchCommandHandler(ILogger<ReserveBatchCommandHandle
                 request.CorrelationId,
                 failures.Count);
 
-            return Task.FromResult(new ReserveBatchResult(false, null, failures));
+            return new ReserveBatchResult(false, null, failures);
         }
 
-        return Task.FromResult(new ReserveBatchResult(false, null, []));
+        var lockKeys = CreateLockKeys(request);
+        await using var lockHandle = await distributedLockService.AcquireAsync(
+            lockKeys,
+            TimeSpan.FromSeconds(30),
+            TimeSpan.FromSeconds(5),
+            cancellationToken);
+
+        return new ReserveBatchResult(false, null, []);
     }
 
     private static List<ReserveBatchFailure> Validate(ReserveBatchCommand request)
@@ -61,4 +73,12 @@ public sealed class ReserveBatchCommandHandler(ILogger<ReserveBatchCommandHandle
         return failures;
     }
 
+    private static IReadOnlyCollection<string> CreateLockKeys(ReserveBatchCommand request)
+    {
+        return request.Items
+            .Select(item => $"inventory:{item.Sku}:{item.WarehouseId}")
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+    }
 }
