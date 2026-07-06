@@ -159,7 +159,7 @@ Update this file when a service boundary, communication pattern, or structural c
 ## FAZ 3: InventoryService gRPC İş Mantığının Geliştirilmesi
 *Hedef: All-or-nothing prensibine sahip atomik rezervasyon motorunu inşa etmek.*
 
-- [ ] **Adım 3.1: GetStock(sku) Metodunun Yazılması**
+- [x] **Adım 3.1: GetStock(sku) Metodunun Yazılması**
   - Verilen SKU'ya ait güncel envanter durumunu dönen servis kodu yazılacak.
   - `warehouseId` verilirse tek depo, boş verilirse SKU'nun toplam/genel stok görünümü dönecek şekilde davranış netleştirilecek.
   - Stok sorgularında correlation id ile technical log üretilecek; bulunamayan SKU/depo, geçersiz istek ve transient Mongo hataları ayrı kategorilerle loglanacak.

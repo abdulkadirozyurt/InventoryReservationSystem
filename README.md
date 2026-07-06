@@ -10,7 +10,7 @@ Goal: keep order management and inventory reservation separate, then connect the
 - Two API services exist: `OrderService.API` and `InventoryService.API`.
 - Shared gRPC contract project exists and generates C# stubs from physically split proto files under `src/contracts/InventoryReservationSystem.Contracts/Protos`.
 - `OrderService.API` exposes a minimal order creation endpoint and calls `InventoryService.API` over gRPC.
-- `InventoryService.API` exposes a gRPC service with stubbed success responses.
+- `InventoryService.API` exposes a gRPC service; `GetStock(sku, warehouseId?)` is wired to Application and MongoDB, while reservation and operational methods still use placeholder responses.
 - InventoryService initializes MongoDB schemas for `InventoryItems`, `Reservations`, and `InventoryTransactions` with validation rules and indexes.
 - InventoryService has Redis distributed lock infrastructure with deterministic lock ordering, Polly retry, lock TTL, safe token-based release, and structured Serilog lock logs.
 - InventoryService writes technical logs through Serilog to console and MongoDB `ApplicationLogs`.
@@ -99,9 +99,17 @@ flowchart TD
     operations --> common
 ```
 
+Current `GetStock` behavior:
+
+- `warehouseId` provided: returns the matching SKU/warehouse stock.
+- `warehouseId` omitted: aggregates the SKU stock across warehouses.
+- Empty SKU returns `INVALID_REQUEST`.
+- Missing stock returns `STOCK_NOT_FOUND`.
+- Transient inventory-store failures are logged with `ErrorCategory=TransientMongoError` and returned as `INVENTORY_STORE_UNAVAILABLE`.
+
 Current limitation:
 
-- MongoDB persistence schemas (`InventoryItems`, `Reservations`) and Redis distributed lock infrastructure are initialized, but reservation expiry worker, release idempotency, real availability checks, and gRPC business logic integration are not complete yet.
+- MongoDB persistence schemas (`InventoryItems`, `Reservations`) and Redis distributed lock infrastructure are initialized, but reservation expiry worker, release idempotency, reservation availability checks, and most gRPC business logic are not complete yet.
 
 ## Tech stack
 

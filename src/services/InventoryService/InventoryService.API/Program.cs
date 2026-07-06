@@ -1,5 +1,6 @@
 using InventoryService.API.Extensions;
 using InventoryService.API.Grpc;
+using InventoryService.Application;
 using InventoryService.Infrastructure;
 using InventoryService.Infrastructure.Mongo;
 
@@ -12,6 +13,7 @@ builder.AddServiceDefaults();
 builder.Services.AddOpenApi();
 builder.Services.AddGrpc();
 
+builder.Services.AddApplicationServices();
 builder.Services.AddInfrastructureServices(builder.Configuration);
 
 var app = builder.Build();

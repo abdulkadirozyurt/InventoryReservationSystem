@@ -1,3 +1,4 @@
+using InventoryService.Application.Inventory.Abstractions;
 using InventoryService.Application.Reservations.Abstractions;
 using InventoryService.Infrastructure.HealthChecks;
 using InventoryService.Infrastructure.Mongo;
@@ -50,6 +51,8 @@ public static class InfrastructureRegistrar
 
             return ConnectionMultiplexer.Connect(options.ConnectionString);
         });
+
+        services.AddScoped<IInventoryItemRepository, InventoryItemRepository>();
 
         services.AddHealthChecks()
             .AddCheck<MongoDbHealthCheck>("mongodb")

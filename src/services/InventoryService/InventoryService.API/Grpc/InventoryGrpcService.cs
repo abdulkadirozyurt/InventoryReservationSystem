@@ -1,9 +1,10 @@
 using Grpc.Core;
 using InventoryReservationSystem.Contracts.Inventory;
+using InventoryService.Application.Inventory.Queries;
 
 namespace InventoryService.API.Grpc;
 
-public sealed class InventoryGrpcService : InventoryReservations.InventoryReservationsBase
+public sealed class InventoryGrpcService(GetStockQueryHandler getStockQueryHandler) : InventoryReservations.InventoryReservationsBase
 {
     public override Task<ReserveBatchResponse> ReserveBatch(ReserveBatchRequest request, ServerCallContext context)
     {
@@ -39,19 +40,28 @@ public sealed class InventoryGrpcService : InventoryReservations.InventoryReserv
         return Task.FromResult(response);
     }
 
-    public override Task<GetStockResponse> GetStock(GetStockRequest request, ServerCallContext context)
+    public override async Task<GetStockResponse> GetStock(GetStockRequest request, ServerCallContext context)
     {
-        var response = new GetStockResponse
+        var correlationId = request.Metadata?.CorrelationId ?? string.Empty;
+        var warehouseId = string.IsNullOrWhiteSpace(request.WarehouseId)
+                ? null
+                : request.WarehouseId;
+
+        var query = new GetStockQuery(request.Sku, warehouseId, correlationId);
+
+        var stockResult = await getStockQueryHandler.HandleAsync(query, context.CancellationToken);
+
+        return new GetStockResponse
         {
             Metadata = CreateMetadata(request.Metadata),
-            Sku = request.Sku,
-            WarehouseId = request.WarehouseId,
-            QuantityAvailable = 0,
-            QuantityReserved = 0,
-            Found = false
-        };
-
-        return Task.FromResult(response);
+            Sku = stockResult.Sku,
+            WarehouseId = stockResult.WarehouseId ?? string.Empty,
+            QuantityAvailable = stockResult.QuantityAvailable,
+            QuantityReserved = stockResult.QuantityReserved,
+            Found = stockResult.Found,
+            ErrorCode = stockResult.ErrorCode ?? string.Empty,
+            ErrorMessage = stockResult.ErrorMessage ?? string.Empty
+        };        
     }
 
     public override Task<StockAdjustmentResponse> IncreaseStock(IncreaseStockRequest request, ServerCallContext context)
