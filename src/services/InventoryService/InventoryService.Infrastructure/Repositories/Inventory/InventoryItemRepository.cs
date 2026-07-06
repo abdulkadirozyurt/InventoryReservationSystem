@@ -1,11 +1,12 @@
 ﻿using InventoryService.Application.Inventory.Abstractions;
 using InventoryService.Application.Inventory.Exceptions;
 using InventoryService.Domain.Inventory;
+using InventoryService.Infrastructure.Mongo;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
 
-namespace InventoryService.Infrastructure.Mongo;
+namespace InventoryService.Infrastructure.Repositories.Inventory;
 
 public sealed class InventoryItemRepository(
     IMongoDatabase database,
@@ -27,7 +28,7 @@ public sealed class InventoryItemRepository(
                 sku,
                 warehouseId,
                 "TransientMongoError");
-            throw;
+            throw new InventoryStoreUnavailableException("Inventory store is unavailable while querying stock", exception);
         }
     }
 
@@ -45,6 +46,27 @@ public sealed class InventoryItemRepository(
                 sku,
                 "TransientMongoError");
             throw new InventoryStoreUnavailableException("Inventory store is unavailable while querying stock", exception);
+        }
+    }
+
+    public async Task UpdateAsync(InventoryItem inventoryItem, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _collection.ReplaceOneAsync(
+                item => item.Sku == inventoryItem.Sku && item.WarehouseId == inventoryItem.WarehouseId,
+                inventoryItem,
+                cancellationToken: cancellationToken);
+        }
+        catch (MongoException exception)
+        {
+            logger.LogError(
+                exception,
+                "MongoDB failed while updating inventory item. Sku: {Sku}, WarehouseId: {WarehouseId}, ErrorCategory: {ErrorCategory}",
+                inventoryItem.Sku,
+                inventoryItem.WarehouseId,
+                "TransientMongoError");
+            throw;
         }
     }
 }

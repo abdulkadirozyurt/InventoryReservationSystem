@@ -6,6 +6,9 @@ using Microsoft.Extensions.Logging;
 namespace InventoryService.Application.Reservations.Commands;
 
 public sealed class ReserveBatchCommandHandler(
+    IInventoryItemRepository inventoryItemRepository,
+    IInventoryTransactionRepository inventoryTransactionRepository,
+    IReservationRepository reservationRepository,
     IInventoryUnitOfWork unitOfWork,
     IDistributedLockService distributedLockService,
     ILogger<ReserveBatchCommandHandler> logger)
@@ -27,13 +30,73 @@ public sealed class ReserveBatchCommandHandler(
         }
 
         var lockKeys = CreateLockKeys(request);
-        await using var lockHandle = await distributedLockService.AcquireAsync(
+
+        try
+        {
+            await using var lockHandle = await distributedLockService.AcquireAsync(
             lockKeys,
             TimeSpan.FromSeconds(30),
             TimeSpan.FromSeconds(5),
             cancellationToken);
 
-        return new ReserveBatchResult(false, null, []);
+            var reservationFailures = new List<ReserveBatchFailure>();
+
+            // stock checking logic
+            await unitOfWork.ExecuteInTransactionAsync(async token => 
+            {
+                foreach (var item in request.Items)
+                {
+                    var inventoryItem = await inventoryItemRepository.GetBySkuAndWarehouseAsync(item.Sku, item.WarehouseId, token);
+
+                    // Check if the inventory item exists
+                    if (inventoryItem is null)
+                    {
+                        reservationFailures.Add(new ReserveBatchFailure(item.Sku, item.WarehouseId, "STOCK_NOT_FOUND", "Stock was not found."));
+                        continue;
+                    }
+
+                    // Check if there is enough available quantity to reserve
+                    if (inventoryItem.QuantityAvailable < item.Quantity)
+                    {
+                        reservationFailures.Add(new ReserveBatchFailure(item.Sku, item.WarehouseId, "INSUFFICIENT_STOCK", "Insufficient stock available."));
+                    }
+                }
+            }, cancellationToken);
+
+
+            if (reservationFailures.Count > 0)
+                return new ReserveBatchResult(false, null, reservationFailures);
+
+            // Proceed with reservation logic
+
+
+
+
+
+            return new ReserveBatchResult(false, null, []);
+        }
+        catch (TimeoutException exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Reserve batch lock acquisition timed out. CorrelationId: {CorrelationId}, LockKeyCount: {LockKeyCount}",
+                request.CorrelationId,
+                lockKeys.Count
+            );
+
+            return new ReserveBatchResult(
+                false,
+                null,
+                [
+                    new ReserveBatchFailure(
+                        string.Empty,
+                        string.Empty,
+                        "LOCK_TIMEOUT",
+                        "Could not acquire inventory locks.")
+                ]
+            );
+        }
+
     }
 
     private static List<ReserveBatchFailure> Validate(ReserveBatchCommand request)

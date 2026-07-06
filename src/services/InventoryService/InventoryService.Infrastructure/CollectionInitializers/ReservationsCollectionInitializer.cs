@@ -1,26 +1,23 @@
-using InventoryService.Domain.Inventory;
+using InventoryService.Infrastructure.Mongo;
 using Microsoft.Extensions.Options;
 using MongoDB.Bson;
 using MongoDB.Driver;
 
-namespace InventoryService.Infrastructure.Mongo;
+namespace InventoryService.Infrastructure.CollectionInitializers;
 
-public sealed class InventoryItemsCollectionInitializer(IMongoDatabase database, IOptions<MongoDbOptions> options)
+public sealed class ReservationsCollectionInitializer(IMongoDatabase database, IOptions<MongoDbOptions> options)
 {
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        var collectionName = options.Value.InventoryItemsCollectionName;
+        var collectionName = options.Value.ReservationsCollectionName;
 
         if (await CollectionExistsAsync(collectionName, cancellationToken))
         {
             await ApplyValidationAsync(collectionName, cancellationToken);
-        }
-        else
-        {
-            await CreateCollectionAsync(collectionName, cancellationToken);
+            return;
         }
 
-        await CreateIndexesAsync(cancellationToken);
+        await CreateCollectionAsync(collectionName, cancellationToken);
     }
 
     private async Task CreateCollectionAsync(string collectionName, CancellationToken cancellationToken)
@@ -49,23 +46,6 @@ public sealed class InventoryItemsCollectionInitializer(IMongoDatabase database,
         await database.RunCommandAsync<BsonDocument>(command, cancellationToken: cancellationToken);
     }
 
-    private async Task CreateIndexesAsync(CancellationToken cancellationToken)
-    {
-        var collection = database.GetCollection<InventoryItem>(options.Value.InventoryItemsCollectionName);
-
-        var indexKeys = Builders<InventoryItem>.IndexKeys
-            .Ascending(x => x.Sku)
-            .Ascending(x => x.WarehouseId);
-
-        var indexModel = new CreateIndexModel<InventoryItem>(indexKeys, new CreateIndexOptions
-        {
-            Name = "ux_inventory_items_sku_warehouse",
-            Unique = true
-        });
-
-        await collection.Indexes.CreateOneAsync(indexModel, cancellationToken: cancellationToken);
-    }
-
     private static BsonDocument BuildValidator()
     {
         return new BsonDocument
@@ -77,41 +57,62 @@ public sealed class InventoryItemsCollectionInitializer(IMongoDatabase database,
                     {
                         "required", new BsonArray
                         {
-                            "sku",
-                            "warehouseId",
-                            "quantityAvailable",
-                            "quantityReserved"
+                            "reservationId",
+                            "orderId",
+                            "items",
+                            "status",
+                            "createdAt",
+                            "expiresAt",
+                            "updatedAt"
                         }
                     },
                     {
                         "properties", new BsonDocument
                         {
                             {
-                                "sku", new BsonDocument
+                                "reservationId", new BsonDocument
                                 {
                                     { "bsonType", "string" },
                                     { "minLength", 1 }
                                 }
                             },
                             {
-                                "warehouseId", new BsonDocument
+                                "orderId", new BsonDocument
                                 {
                                     { "bsonType", "string" },
                                     { "minLength", 1 }
                                 }
                             },
                             {
-                                "quantityAvailable", new BsonDocument
+                                "items", new BsonDocument
                                 {
-                                    { "bsonType", "int" },
-                                    { "minimum", 0 }
+                                    { "bsonType", "array" },
+                                    { "minItems", 1 }
                                 }
                             },
                             {
-                                "quantityReserved", new BsonDocument
+                                "status", new BsonDocument
                                 {
-                                    { "bsonType", "int" },
-                                    { "minimum", 0 }
+                                    { "bsonType", "string" },
+                                    { "enum", new BsonArray { "Pending", "Confirmed", "Released", "Expired" } }
+                                }
+                            },
+                            {
+                                "createdAt", new BsonDocument
+                                {
+                                    { "bsonType", "date" }
+                                }
+                            },
+                            {
+                                "expiresAt", new BsonDocument
+                                {
+                                    { "bsonType", "date" }
+                                }
+                            },
+                            {
+                                "updatedAt", new BsonDocument
+                                {
+                                    { "bsonType", "date" }
                                 }
                             }
                         }

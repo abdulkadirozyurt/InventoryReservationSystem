@@ -2,7 +2,7 @@ using InventoryService.API.Extensions;
 using InventoryService.API.Grpc;
 using InventoryService.Application;
 using InventoryService.Infrastructure;
-using InventoryService.Infrastructure.Mongo;
+using InventoryService.Infrastructure.CollectionInitializers;
 
 var builder = WebApplication.CreateBuilder(args);
 

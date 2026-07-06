@@ -1,4 +1,4 @@
-namespace InventoryService.Infrastructure.Mongo;
+namespace InventoryService.Infrastructure.CollectionInitializers;
 
 public sealed class MongoCollectionInitializer(
     InventoryItemsCollectionInitializer inventoryItemsInitializer,

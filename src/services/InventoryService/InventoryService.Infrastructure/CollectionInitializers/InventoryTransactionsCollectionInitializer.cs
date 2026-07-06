@@ -1,9 +1,10 @@
 ﻿using InventoryService.Domain.InventoryTransactions;
+using InventoryService.Infrastructure.Mongo;
 using Microsoft.Extensions.Options;
 using MongoDB.Bson;
 using MongoDB.Driver;
 
-namespace InventoryService.Infrastructure.Mongo;
+namespace InventoryService.Infrastructure.CollectionInitializers;
 
 public sealed class InventoryTransactionsCollectionInitializer(IMongoDatabase database, IOptions<MongoDbOptions> options)
 {

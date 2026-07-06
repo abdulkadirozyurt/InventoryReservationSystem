@@ -1,8 +1,11 @@
 using InventoryService.Application.Inventory.Abstractions;
 using InventoryService.Application.Reservations.Abstractions;
+using InventoryService.Infrastructure.CollectionInitializers;
 using InventoryService.Infrastructure.HealthChecks;
 using InventoryService.Infrastructure.Mongo;
 using InventoryService.Infrastructure.Redis;
+using InventoryService.Infrastructure.Repositories.Inventory;
+using InventoryService.Infrastructure.Repositories.Reservations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -53,6 +56,9 @@ public static class InfrastructureRegistrar
         });
 
         services.AddScoped<IInventoryItemRepository, InventoryItemRepository>();
+        services.AddScoped<IReservationRepository, ReservationRepository>();
+        services.AddScoped<IInventoryTransactionRepository, InventoryTransactionRepository>();
+        services.AddScoped<IInventoryUnitOfWork, InventoryUnitOfWork>();
 
         services.AddHealthChecks()
             .AddCheck<MongoDbHealthCheck>("mongodb")

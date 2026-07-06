@@ -20,4 +20,11 @@ public interface IInventoryItemRepository
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The matching inventory item, or null when no stock exists for the SKU and warehouse.</returns>
     Task<InventoryItem?> GetBySkuAndWarehouseAsync(string sku, string warehouseId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persists changes made to an existing inventory item.
+    /// </summary>
+    /// <param name="inventoryItem">The inventory item to update.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task UpdateAsync(InventoryItem inventoryItem, CancellationToken cancellationToken = default);
 }
