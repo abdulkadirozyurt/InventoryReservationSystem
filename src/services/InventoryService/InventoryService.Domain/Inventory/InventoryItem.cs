@@ -27,8 +27,8 @@ public sealed class InventoryItem
         WarehouseId = warehouseId;
         QuantityAvailable = quantityAvailable;
         QuantityReserved = 0;
-        CreatedAt = DateTimeOffset.UtcNow;
-        UpdatedAt = DateTimeOffset.UtcNow;
+        CreatedAt = DateTime.UtcNow;
+        UpdatedAt = DateTime.UtcNow;
     }
 
     [BsonRepresentation(BsonType.ObjectId)]
@@ -47,10 +47,10 @@ public sealed class InventoryItem
     public int QuantityReserved { get; private set; }
 
     [BsonElement("createdAt")]
-    public DateTimeOffset CreatedAt { get; private set; }
+    public DateTime CreatedAt { get; private set; }
 
     [BsonElement("updatedAt")]
-    public DateTimeOffset UpdatedAt { get; private set; }
+    public DateTime UpdatedAt { get; private set; }
 
 
 
@@ -66,7 +66,7 @@ public sealed class InventoryItem
         }
         QuantityAvailable -= quantity;
         QuantityReserved += quantity;
-        UpdatedAt = DateTimeOffset.UtcNow;
+        UpdatedAt = DateTime.UtcNow;
     }
 
     public void Release(int quantity)
@@ -79,7 +79,7 @@ public sealed class InventoryItem
 
         QuantityReserved -= quantity;
         QuantityAvailable += quantity;
-        UpdatedAt = DateTimeOffset.UtcNow;
+        UpdatedAt = DateTime.UtcNow;
     }
 
     public void Confirm(int quantity)
@@ -90,7 +90,7 @@ public sealed class InventoryItem
             throw new InvalidOperationException("Not enough quantity reserved to confirm.");
 
         QuantityReserved -= quantity;
-        UpdatedAt = DateTimeOffset.UtcNow;
+        UpdatedAt = DateTime.UtcNow;
     }
 }
 

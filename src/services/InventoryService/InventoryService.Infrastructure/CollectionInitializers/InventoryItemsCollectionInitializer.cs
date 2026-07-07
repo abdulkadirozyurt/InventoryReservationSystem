@@ -22,6 +22,7 @@ public sealed class InventoryItemsCollectionInitializer(IMongoDatabase database,
         }
 
         await CreateIndexesAsync(cancellationToken);
+        await SeedDemoInventoryItemsAsync(cancellationToken);
     }
 
     private async Task CreateCollectionAsync(string collectionName, CancellationToken cancellationToken)
@@ -65,6 +66,30 @@ public sealed class InventoryItemsCollectionInitializer(IMongoDatabase database,
         });
 
         await collection.Indexes.CreateOneAsync(indexModel, cancellationToken: cancellationToken);
+    }
+
+    private async Task SeedDemoInventoryItemsAsync(CancellationToken cancellationToken)
+    {
+        var collection = database.GetCollection<BsonDocument>(options.Value.InventoryItemsCollectionName);
+
+        var filter = Builders<BsonDocument>.Filter.And(
+            Builders<BsonDocument>.Filter.Eq("sku", "SKU-001"),
+            Builders<BsonDocument>.Filter.Eq("warehouseId", "WH-1"));
+
+        if (await collection.Find(filter).AnyAsync(cancellationToken))
+            return;
+
+        var now = DateTime.UtcNow;
+
+        await collection.InsertOneAsync(new BsonDocument
+        {
+            { "sku", "SKU-001" },
+            { "warehouseId", "WH-1" },
+            { "quantityAvailable", 10 },
+            { "quantityReserved", 0 },
+            { "createdAt", now },
+            { "updatedAt", now }
+        }, cancellationToken: cancellationToken);
     }
 
     private static BsonDocument BuildValidator()

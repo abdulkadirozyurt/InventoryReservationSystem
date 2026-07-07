@@ -45,8 +45,8 @@ public sealed class InventoryTransaction
         CorrelationId = correlationId;
         ReservationId = string.IsNullOrWhiteSpace(reservationId) ? null : reservationId;
         OrderId = string.IsNullOrWhiteSpace(orderId) ? null : orderId;
-        Reason = string.IsNullOrWhiteSpace(reason) ? null : reason;
-        CreatedAt = DateTimeOffset.UtcNow;
+        Reason = string.IsNullOrWhiteSpace(reason) ? string.Empty : reason;
+        CreatedAt = DateTime.UtcNow;
     }
 
     [BsonId]
@@ -79,10 +79,10 @@ public sealed class InventoryTransaction
     public string? OrderId { get; private set; }
 
     [BsonElement("reason")]
-    public string? Reason { get; private set; }
+    public string? Reason { get; private set; }=string.Empty;
 
     [BsonElement("createdAt")]
-    public DateTimeOffset CreatedAt { get; private set; }
+    public DateTime CreatedAt { get; private set; }
 
 
     private static bool RequiresReason(InventoryTransactionType type)

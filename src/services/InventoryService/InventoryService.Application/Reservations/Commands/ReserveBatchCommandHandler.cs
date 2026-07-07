@@ -186,7 +186,7 @@ public sealed class ReserveBatchCommandHandler(
             reservationId,
             command.OrderId,
             reservationItems,
-            DateTimeOffset.UtcNow.AddMinutes(10));
+            DateTime.UtcNow.AddMinutes(10));
 
         await reservationRepository.AddAsync(reservation, cancellationToken);
     }

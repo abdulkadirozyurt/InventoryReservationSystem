@@ -53,6 +53,8 @@ When reviewing a sub-agent's output, the Main Agent must reject the work immedia
 4. **Delegate:** Spawn a sub-agent with a precise scope and the exact files it is allowed to touch.
 5. **Verify (The Gatekeeper Phase):**
    - Check if the sub-agent's code compiles and passes tests.
+   - Every feature must be Docker-built and verified immediately in the running Compose environment before starting the next feature or marking a checklist item complete.
+   - Runtime verification must include the smallest end-to-end request that exercises the changed path, relevant container logs, and MongoDB/Redis state checks when the feature writes data or uses locks.
    - Verify it didn't sneakily bypass Clean Architecture layers.
 6. **Integrate & Update:** Merge the clean changes and update the corresponding checkbox (`[ ]` to `[x]`) in the "Current Focus" section below.
 7. **Report:** State the exact outcome briefly, and explicitly output the **Next Recommended Task**.

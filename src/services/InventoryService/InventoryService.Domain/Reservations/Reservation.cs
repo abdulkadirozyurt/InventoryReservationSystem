@@ -1,5 +1,6 @@
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
+using MongoDB.Bson.Serialization.Serializers;
 
 namespace InventoryService.Domain.Reservations;
 
@@ -11,7 +12,7 @@ public sealed class Reservation
     }
 
     [BsonConstructor]
-    public Reservation(string reservationId, string orderId, List<ReservationItem> items, DateTimeOffset expiresAt)
+    public Reservation(string reservationId, string orderId, List<ReservationItem> items, DateTime expiresAt)
     {
         if (items is null)
             throw new ArgumentNullException(nameof(items));
@@ -27,15 +28,15 @@ public sealed class Reservation
         if (itemList.Count == 0)
             throw new ArgumentException("Reservation must contain at least one item.", nameof(items));
 
-        if (expiresAt <= DateTimeOffset.UtcNow)
+        if (expiresAt <= DateTime.UtcNow)
             throw new ArgumentException("Expiration date must be in the future.", nameof(expiresAt));
 
         ReservationId = reservationId;
         OrderId = orderId;
         Items = itemList;
         Status = ReservationStatus.Pending;
-        CreatedAt = DateTimeOffset.UtcNow;
-        UpdatedAt = DateTimeOffset.UtcNow;
+        CreatedAt = DateTime.UtcNow;
+        UpdatedAt = DateTime.UtcNow;
         ExpiresAt = expiresAt;
     }
 
@@ -53,13 +54,13 @@ public sealed class Reservation
     public ReservationStatus Status { get; private set; }
 
     [BsonElement("createdAt")]
-    public DateTimeOffset CreatedAt { get; private set; }
+    public DateTime CreatedAt { get; private set; }
 
     [BsonElement("expiresAt")]
-    public DateTimeOffset ExpiresAt { get; private set; }
+    public DateTime ExpiresAt { get; private set; }
 
     [BsonElement("updatedAt")]
-    public DateTimeOffset UpdatedAt { get; private set; }
+    public DateTime UpdatedAt { get; private set; }
 
     [BsonElement("items")]
     public List<ReservationItem> Items { get; private set; } = [];
@@ -70,7 +71,7 @@ public sealed class Reservation
         EnsurePending();
 
         Status = ReservationStatus.Confirmed;
-        UpdatedAt = DateTimeOffset.UtcNow;
+        UpdatedAt = DateTime.UtcNow;
     }
 
     public void Release()
@@ -78,7 +79,7 @@ public sealed class Reservation
         EnsurePending();
 
         Status = ReservationStatus.Released;
-        UpdatedAt = DateTimeOffset.UtcNow;
+        UpdatedAt = DateTime.UtcNow;
     }
 
     public void Expire()
@@ -86,7 +87,7 @@ public sealed class Reservation
         EnsurePending();
 
         Status = ReservationStatus.Expired;
-        UpdatedAt = DateTimeOffset.UtcNow;
+        UpdatedAt = DateTime.UtcNow;
     }
 
     private void EnsurePending()
