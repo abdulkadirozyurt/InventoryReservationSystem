@@ -1,4 +1,5 @@
-﻿using InventoryService.Application.Inventory.Abstractions;
+using InventoryService.Application.Inventory.Abstractions;
+using InventoryService.Application.Inventory.Exceptions;
 using InventoryService.Application.Reservations.Abstractions;
 using InventoryService.Application.Reservations.Results;
 using InventoryService.Domain.Inventory;
@@ -53,7 +54,7 @@ public sealed class ReserveBatchCommandHandler(
                 LockWaitTimeout,
                 cancellationToken);
 
-            
+
             var stockItemsToReserve = new List<(InventoryItem StockItem, int Quantity)>();
 
             var stockFailures = new List<ReserveBatchFailure>();
@@ -119,10 +120,44 @@ public sealed class ReserveBatchCommandHandler(
                 ]
             );
         }
+        catch (OperationCanceledException exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Reserve batch was cancelled. CorrelationId: {CorrelationId}",
+                command.CorrelationId);
+
+            throw;
+        }
+        catch (InventoryStoreUnavailableException exception)
+        {
+            logger.LogError(
+                exception,
+                "Reserve batch failed due to inventory store unavailability. CorrelationId: {CorrelationId}, ErrorCategory: {ErrorCategory}",
+                command.CorrelationId,
+                "InventoryStoreUnavailable");
+
+            throw;
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "Reserve batch failed with an unexpected system error. CorrelationId: {CorrelationId}, ErrorCategory: {ErrorCategory}",
+                command.CorrelationId,
+                "UnexpectedSystemError");
+
+            throw;
+        }
 
     }
 
-    private async Task PersistSuccessfulReservationAsync(IEnumerable<(InventoryItem StockItem, int Quantity)> stockItemsToReserve, string reservationId, ReserveBatchCommand command, CancellationToken cancellationToken)
+
+    private async Task PersistSuccessfulReservationAsync(
+        IEnumerable<(InventoryItem StockItem, int Quantity)> stockItemsToReserve, 
+        string reservationId, 
+        ReserveBatchCommand command, 
+        CancellationToken cancellationToken)
     {
         var reservationItems = new List<ReservationItem>();
 

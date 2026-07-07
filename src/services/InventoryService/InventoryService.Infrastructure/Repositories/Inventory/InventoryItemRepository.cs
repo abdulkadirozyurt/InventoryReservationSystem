@@ -1,4 +1,4 @@
-﻿using InventoryService.Application.Inventory.Abstractions;
+using InventoryService.Application.Inventory.Abstractions;
 using InventoryService.Application.Inventory.Exceptions;
 using InventoryService.Domain.Inventory;
 using InventoryService.Infrastructure.Mongo;
@@ -10,15 +10,25 @@ namespace InventoryService.Infrastructure.Repositories.Inventory;
 
 public sealed class InventoryItemRepository(
     IMongoDatabase database,
+    IMongoSessionProvider mongoSessionProvider,
     IOptions<MongoDbOptions> options,
     ILogger<IInventoryItemRepository> logger) : IInventoryItemRepository
 {
     private readonly IMongoCollection<InventoryItem> _collection = database.GetCollection<InventoryItem>(options.Value.InventoryItemsCollectionName);
+
     public async Task<InventoryItem?> GetBySkuAndWarehouseAsync(string sku, string warehouseId, CancellationToken cancellationToken = default)
     {
         try
         {
-            return await _collection.Find(item => item.Sku == sku && item.WarehouseId == warehouseId).FirstOrDefaultAsync(cancellationToken);
+            var filter = Builders<InventoryItem>.Filter.And(
+                Builders<InventoryItem>.Filter.Eq(item => item.Sku, sku),
+                Builders<InventoryItem>.Filter.Eq(item => item.WarehouseId, warehouseId));
+
+            var session = mongoSessionProvider.CurrentSession;
+            if (session is not null)
+                return await _collection.Find(session, filter).FirstOrDefaultAsync(cancellationToken);
+
+            return await _collection.Find(filter).FirstOrDefaultAsync(cancellationToken);
         }
         catch (MongoException exception)
         {
@@ -36,7 +46,13 @@ public sealed class InventoryItemRepository(
     {
         try
         {
-            return await _collection.Find(item => item.Sku == sku).ToListAsync(cancellationToken);
+            var filter = Builders<InventoryItem>.Filter.Eq(item => item.Sku, sku);
+            var session = mongoSessionProvider.CurrentSession;
+
+            if (session is not null)
+                return await _collection.Find(session, filter).ToListAsync(cancellationToken);
+
+            return await _collection.Find(filter).ToListAsync(cancellationToken);
         }
         catch (MongoException exception)
         {
@@ -53,10 +69,23 @@ public sealed class InventoryItemRepository(
     {
         try
         {
-            await _collection.ReplaceOneAsync(
-                item => item.Sku == inventoryItem.Sku && item.WarehouseId == inventoryItem.WarehouseId,
-                inventoryItem,
-                cancellationToken: cancellationToken);
+            var filter = Builders<InventoryItem>.Filter.And(
+                Builders<InventoryItem>.Filter.Eq(item => item.Sku, inventoryItem.Sku),
+                Builders<InventoryItem>.Filter.Eq(item => item.WarehouseId, inventoryItem.WarehouseId));
+
+            var session = mongoSessionProvider.CurrentSession;
+            if (session is not null)
+            {
+                await _collection.ReplaceOneAsync(
+                    session,
+                    filter,
+                    inventoryItem,
+                    cancellationToken: cancellationToken);
+
+                return;
+            }
+
+            await _collection.ReplaceOneAsync(filter, inventoryItem, cancellationToken: cancellationToken);
         }
         catch (MongoException exception)
         {
@@ -66,7 +95,7 @@ public sealed class InventoryItemRepository(
                 inventoryItem.Sku,
                 inventoryItem.WarehouseId,
                 "TransientMongoError");
-            throw;
+            throw new InventoryStoreUnavailableException("Inventory store is unavailable while updating stock", exception);
         }
     }
 }

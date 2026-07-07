@@ -1,4 +1,5 @@
-﻿using InventoryService.Application.Reservations.Abstractions;
+using InventoryService.Application.Inventory.Exceptions;
+using InventoryService.Application.Reservations.Abstractions;
 using InventoryService.Domain.Reservations;
 using InventoryService.Infrastructure.Mongo;
 using Microsoft.Extensions.Logging;
@@ -9,6 +10,7 @@ namespace InventoryService.Infrastructure.Repositories.Reservations;
 
 public sealed class ReservationRepository(
     IMongoDatabase database,
+    IMongoSessionProvider mongoSessionProvider,
     IOptions<MongoDbOptions> options,
     ILogger<ReservationRepository> logger) : IReservationRepository
 {
@@ -18,6 +20,13 @@ public sealed class ReservationRepository(
     {
         try
         {
+            var session = mongoSessionProvider.CurrentSession;
+            if (session is not null)
+            {
+                await _collection.InsertOneAsync(session, reservation, cancellationToken: cancellationToken);
+                return;
+            }
+
             await _collection.InsertOneAsync(reservation, cancellationToken: cancellationToken);
         }
         catch (MongoException exception)
@@ -28,7 +37,7 @@ public sealed class ReservationRepository(
                 reservation.ReservationId,
                 reservation.OrderId,
                 "TransientMongoError");
-            throw;
+            throw new InventoryStoreUnavailableException("Inventory store is unavailable while adding reservation", exception);
         }
     }
 }

@@ -59,6 +59,7 @@ public static class InfrastructureRegistrar
         services.AddScoped<IReservationRepository, ReservationRepository>();
         services.AddScoped<IInventoryTransactionRepository, InventoryTransactionRepository>();
         services.AddScoped<IInventoryUnitOfWork, InventoryUnitOfWork>();
+        services.AddScoped<IMongoSessionProvider, MongoSessionProvider>();
 
         services.AddHealthChecks()
             .AddCheck<MongoDbHealthCheck>("mongodb")
