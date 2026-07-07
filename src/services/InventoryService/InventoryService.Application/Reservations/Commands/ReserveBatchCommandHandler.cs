@@ -2,6 +2,8 @@
 using InventoryService.Application.Reservations.Abstractions;
 using InventoryService.Application.Reservations.Results;
 using InventoryService.Domain.Inventory;
+using InventoryService.Domain.InventoryTransactions;
+using InventoryService.Domain.Reservations;
 using Microsoft.Extensions.Logging;
 
 namespace InventoryService.Application.Reservations.Commands;
@@ -15,6 +17,12 @@ public sealed class ReserveBatchCommandHandler(
     ILogger<ReserveBatchCommandHandler> logger)
 {
     private const string ValidationFailure = "VALIDATION_ERROR";
+    private const string StockNotFound = "STOCK_NOT_FOUND";
+    private const string InsufficientStock = "INSUFFICIENT_STOCK";
+    private const string LockTimeout = "LOCK_TIMEOUT";
+
+    private static readonly TimeSpan LockExpiry = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan LockWaitTimeout = TimeSpan.FromSeconds(5);
 
     public async Task<ReserveBatchResult> HandleAsync(ReserveBatchCommand command, CancellationToken cancellationToken)
     {
@@ -31,28 +39,26 @@ public sealed class ReserveBatchCommandHandler(
         }
 
         // Collapse duplicate SKU + warehouse lines before locking and stock checks.
-        var requestedItems = command.Items
-            .GroupBy(requestedItem => new { requestedItem.Sku, requestedItem.WarehouseId })
-            .Select(group => new ReserveBatchItemCommand(
-                group.Key.Sku,
-                group.Key.WarehouseId,
-                group.Sum(requestedItem => requestedItem.Quantity)))
-            .ToArray();
+        var requestedItems = AggregateRequestedItems(command.Items);
 
+        // Create lock keys for each unique SKU + warehouse combination.
         var inventoryStockLockKeys = CreateInventoryStockLockKeys(requestedItems);
 
         try
         {
+            // Acquire distributed locks for all requested SKU + warehouse combinations.
             await using var lockHandle = await distributedLockService.AcquireAsync(
                 inventoryStockLockKeys,
-                TimeSpan.FromSeconds(30),
-                TimeSpan.FromSeconds(5),
+                LockExpiry,
+                LockWaitTimeout,
                 cancellationToken);
 
-
+            
             var stockItemsToReserve = new List<(InventoryItem StockItem, int Quantity)>();
 
             var stockFailures = new List<ReserveBatchFailure>();
+
+            var reservationId = Guid.CreateVersion7().ToString("N");
 
             // Read every stock row before allowing the batch to continue.
             await unitOfWork.ExecuteInTransactionAsync(async token =>
@@ -65,32 +71,32 @@ public sealed class ReserveBatchCommandHandler(
                     // if stock is not found, add a failure and continue to the next item
                     if (stockItem is null)
                     {
-                        stockFailures.Add(new ReserveBatchFailure(requestedItem.Sku, requestedItem.WarehouseId, "STOCK_NOT_FOUND", "Stock was not found."));
+                        stockFailures.Add(new ReserveBatchFailure(requestedItem.Sku, requestedItem.WarehouseId, StockNotFound, "Stock was not found."));
                         continue;
                     }
 
                     // if stock is found but the available quantity is less than the requested quantity, add a failure
                     if (stockItem.QuantityAvailable < requestedItem.Quantity)
                     {
-                        stockFailures.Add(new ReserveBatchFailure(requestedItem.Sku, requestedItem.WarehouseId, "INSUFFICIENT_STOCK", "Insufficient stock available."));
+                        stockFailures.Add(new ReserveBatchFailure(requestedItem.Sku, requestedItem.WarehouseId, InsufficientStock, "Insufficient stock available."));
                         continue;
                     }
 
                     stockItemsToReserve.Add((stockItem, requestedItem.Quantity));
                 }
 
-                foreach (var (stockItem, quantity) in stockItemsToReserve)
-                {
-                    stockItem.Reserve(quantity);
-                    await inventoryItemRepository.UpdateAsync(stockItem, token);
-                }
+                if (stockFailures.Count > 0)
+                    return;
+
+                await PersistSuccessfulReservationAsync(stockItemsToReserve, reservationId, command, token);
+
             }, cancellationToken);
 
             // If there are any stock failures, return them without making any reservations.
             if (stockFailures.Count > 0)
                 return new ReserveBatchResult(false, null, stockFailures);
 
-            return new ReserveBatchResult(false, Guid.CreateVersion7().ToString("N"), []);
+            return new ReserveBatchResult(true, reservationId, []);
         }
         catch (TimeoutException exception)
         {
@@ -108,12 +114,46 @@ public sealed class ReserveBatchCommandHandler(
                     new ReserveBatchFailure(
                         string.Empty,
                         string.Empty,
-                        "LOCK_TIMEOUT",
+                        LockTimeout,
                         "Could not acquire inventory locks.")
                 ]
             );
         }
 
+    }
+
+    private async Task PersistSuccessfulReservationAsync(IEnumerable<(InventoryItem StockItem, int Quantity)> stockItemsToReserve, string reservationId, ReserveBatchCommand command, CancellationToken cancellationToken)
+    {
+        var reservationItems = new List<ReservationItem>();
+
+        foreach (var (stockItem, quantity) in stockItemsToReserve)
+        {
+            stockItem.Reserve(quantity);
+            await inventoryItemRepository.UpdateAsync(stockItem, cancellationToken);
+
+            reservationItems.Add(new ReservationItem(stockItem.Sku, stockItem.WarehouseId, quantity));
+
+            var transaction = new InventoryTransaction(
+                stockItem.Sku,
+                stockItem.WarehouseId,
+                InventoryTransactionType.Reserve,
+                -quantity,
+                quantity,
+                command.CorrelationId,
+                reservationId,
+                command.OrderId,
+                null);
+
+            await inventoryTransactionRepository.AddAsync(transaction, cancellationToken);
+        }
+
+        var reservation = new Reservation(
+            reservationId,
+            command.OrderId,
+            reservationItems,
+            DateTimeOffset.UtcNow.AddMinutes(10));
+
+        await reservationRepository.AddAsync(reservation, cancellationToken);
     }
 
     private static List<ReserveBatchFailure> Validate(ReserveBatchCommand command)
@@ -161,4 +201,16 @@ public sealed class ReserveBatchCommandHandler(
             .Order(StringComparer.Ordinal)
             .ToArray();
     }
+
+    private static ReserveBatchItemCommand[] AggregateRequestedItems(IEnumerable<ReserveBatchItemCommand> items)
+    {
+        return items
+            .GroupBy(item => new { item.Sku, item.WarehouseId })
+            .Select(group => new ReserveBatchItemCommand(
+                group.Key.Sku,
+                group.Key.WarehouseId,
+                group.Sum(item => item.Quantity)))
+            .ToArray();
+    }
+
 }
