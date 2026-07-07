@@ -76,10 +76,12 @@ message ReservationItem {
 
 // ReservationFailure: Batch başarısız olduğunda hangi SKU neden başarısız oldu bilgisini taşır.
 message ReservationFailure {
-  string sku = 1;
+  string sku    = 1;
   string reason = 2;
 
   // error_code: Makine tarafından okunabilir hata kodu.
   // Örnek: INSUFFICIENT_STOCK, SKU_NOT_FOUND, VALIDATION_ERROR.
   string error_code = 3;
+
+  string warehouse_id = 4;
 }

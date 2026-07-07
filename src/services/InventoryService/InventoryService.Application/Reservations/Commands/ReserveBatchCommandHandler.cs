@@ -1,6 +1,7 @@
 ﻿using InventoryService.Application.Inventory.Abstractions;
 using InventoryService.Application.Reservations.Abstractions;
 using InventoryService.Application.Reservations.Results;
+using InventoryService.Domain.Inventory;
 using Microsoft.Extensions.Logging;
 
 namespace InventoryService.Application.Reservations.Commands;
@@ -15,73 +16,89 @@ public sealed class ReserveBatchCommandHandler(
 {
     private const string ValidationFailure = "VALIDATION_ERROR";
 
-    public async Task<ReserveBatchResult> HandleAsync(ReserveBatchCommand request, CancellationToken cancellationToken)
+    public async Task<ReserveBatchResult> HandleAsync(ReserveBatchCommand command, CancellationToken cancellationToken)
     {
-        var failures = Validate(request);
+        var validationFailures = Validate(command);
 
-        if (failures.Count > 0)
+        if (validationFailures.Count > 0)
         {
             logger.LogWarning(
                 "Reserve batch validation failed. CorrelationId: {CorrelationId}, FailureCount: {FailureCount}",
-                request.CorrelationId,
-                failures.Count);
+                command.CorrelationId,
+                validationFailures.Count);
 
-            return new ReserveBatchResult(false, null, failures);
+            return new ReserveBatchResult(false, null, validationFailures);
         }
 
-        var lockKeys = CreateLockKeys(request);
+        // Collapse duplicate SKU + warehouse lines before locking and stock checks.
+        var requestedItems = command.Items
+            .GroupBy(requestedItem => new { requestedItem.Sku, requestedItem.WarehouseId })
+            .Select(group => new ReserveBatchItemCommand(
+                group.Key.Sku,
+                group.Key.WarehouseId,
+                group.Sum(requestedItem => requestedItem.Quantity)))
+            .ToArray();
+
+        var inventoryStockLockKeys = CreateInventoryStockLockKeys(requestedItems);
 
         try
         {
             await using var lockHandle = await distributedLockService.AcquireAsync(
-            lockKeys,
-            TimeSpan.FromSeconds(30),
-            TimeSpan.FromSeconds(5),
-            cancellationToken);
+                inventoryStockLockKeys,
+                TimeSpan.FromSeconds(30),
+                TimeSpan.FromSeconds(5),
+                cancellationToken);
 
-            var reservationFailures = new List<ReserveBatchFailure>();
 
-            // stock checking logic
-            await unitOfWork.ExecuteInTransactionAsync(async token => 
+            var stockItemsToReserve = new List<(InventoryItem StockItem, int Quantity)>();
+
+            var stockFailures = new List<ReserveBatchFailure>();
+
+            // Read every stock row before allowing the batch to continue.
+            await unitOfWork.ExecuteInTransactionAsync(async token =>
             {
-                foreach (var item in request.Items)
+                foreach (var requestedItem in requestedItems)
                 {
-                    var inventoryItem = await inventoryItemRepository.GetBySkuAndWarehouseAsync(item.Sku, item.WarehouseId, token);
+                    // find stock for the requested SKU and warehouse
+                    var stockItem = await inventoryItemRepository.GetBySkuAndWarehouseAsync(requestedItem.Sku, requestedItem.WarehouseId, token);
 
-                    // Check if the inventory item exists
-                    if (inventoryItem is null)
+                    // if stock is not found, add a failure and continue to the next item
+                    if (stockItem is null)
                     {
-                        reservationFailures.Add(new ReserveBatchFailure(item.Sku, item.WarehouseId, "STOCK_NOT_FOUND", "Stock was not found."));
+                        stockFailures.Add(new ReserveBatchFailure(requestedItem.Sku, requestedItem.WarehouseId, "STOCK_NOT_FOUND", "Stock was not found."));
                         continue;
                     }
 
-                    // Check if there is enough available quantity to reserve
-                    if (inventoryItem.QuantityAvailable < item.Quantity)
+                    // if stock is found but the available quantity is less than the requested quantity, add a failure
+                    if (stockItem.QuantityAvailable < requestedItem.Quantity)
                     {
-                        reservationFailures.Add(new ReserveBatchFailure(item.Sku, item.WarehouseId, "INSUFFICIENT_STOCK", "Insufficient stock available."));
+                        stockFailures.Add(new ReserveBatchFailure(requestedItem.Sku, requestedItem.WarehouseId, "INSUFFICIENT_STOCK", "Insufficient stock available."));
+                        continue;
                     }
+
+                    stockItemsToReserve.Add((stockItem, requestedItem.Quantity));
+                }
+
+                foreach (var (stockItem, quantity) in stockItemsToReserve)
+                {
+                    stockItem.Reserve(quantity);
+                    await inventoryItemRepository.UpdateAsync(stockItem, token);
                 }
             }, cancellationToken);
 
+            // If there are any stock failures, return them without making any reservations.
+            if (stockFailures.Count > 0)
+                return new ReserveBatchResult(false, null, stockFailures);
 
-            if (reservationFailures.Count > 0)
-                return new ReserveBatchResult(false, null, reservationFailures);
-
-            // Proceed with reservation logic
-
-
-
-
-
-            return new ReserveBatchResult(false, null, []);
+            return new ReserveBatchResult(false, Guid.CreateVersion7().ToString("N"), []);
         }
         catch (TimeoutException exception)
         {
             logger.LogWarning(
                 exception,
                 "Reserve batch lock acquisition timed out. CorrelationId: {CorrelationId}, LockKeyCount: {LockKeyCount}",
-                request.CorrelationId,
-                lockKeys.Count
+                command.CorrelationId,
+                inventoryStockLockKeys.Count
             );
 
             return new ReserveBatchResult(
@@ -99,47 +116,47 @@ public sealed class ReserveBatchCommandHandler(
 
     }
 
-    private static List<ReserveBatchFailure> Validate(ReserveBatchCommand request)
+    private static List<ReserveBatchFailure> Validate(ReserveBatchCommand command)
     {
         var failures = new List<ReserveBatchFailure>();
 
-        if (string.IsNullOrWhiteSpace(request.OrderId))
+        if (string.IsNullOrWhiteSpace(command.OrderId))
         {
             failures.Add(new ReserveBatchFailure(string.Empty, string.Empty, ValidationFailure, "Order ID is required."));
         }
 
-        if (string.IsNullOrWhiteSpace(request.CorrelationId))
+        if (string.IsNullOrWhiteSpace(command.CorrelationId))
         {
             failures.Add(new ReserveBatchFailure(string.Empty, string.Empty, ValidationFailure, "Correlation ID is required."));
         }
 
-        if (request.Items is null || request.Items.Count == 0)
+        if (command.Items is null || command.Items.Count == 0)
         {
             failures.Add(new ReserveBatchFailure(string.Empty, string.Empty, ValidationFailure, "Items are required."));
         }
 
-        if (request.Items is not null)
+        if (command.Items is not null)
         {
-            foreach (var item in request.Items)
+            foreach (var requestedItem in command.Items)
             {
-                if (string.IsNullOrWhiteSpace(item.Sku))
-                    failures.Add(new ReserveBatchFailure(item.Sku, item.WarehouseId, ValidationFailure, "SKU is required."));
+                if (string.IsNullOrWhiteSpace(requestedItem.Sku))
+                    failures.Add(new ReserveBatchFailure(requestedItem.Sku, requestedItem.WarehouseId, ValidationFailure, "SKU is required."));
 
-                if (string.IsNullOrWhiteSpace(item.WarehouseId))
-                    failures.Add(new ReserveBatchFailure(item.Sku, item.WarehouseId, ValidationFailure, "Warehouse ID is required."));
+                if (string.IsNullOrWhiteSpace(requestedItem.WarehouseId))
+                    failures.Add(new ReserveBatchFailure(requestedItem.Sku, requestedItem.WarehouseId, ValidationFailure, "Warehouse ID is required."));
 
-                if (item.Quantity <= 0)
-                    failures.Add(new ReserveBatchFailure(item.Sku, item.WarehouseId, ValidationFailure, "Quantity must be greater than zero."));
+                if (requestedItem.Quantity <= 0)
+                    failures.Add(new ReserveBatchFailure(requestedItem.Sku, requestedItem.WarehouseId, ValidationFailure, "Quantity must be greater than zero."));
             }
         }
 
         return failures;
     }
 
-    private static IReadOnlyCollection<string> CreateLockKeys(ReserveBatchCommand request)
+    private static IReadOnlyCollection<string> CreateInventoryStockLockKeys(IEnumerable<ReserveBatchItemCommand> requestedItems)
     {
-        return request.Items
-            .Select(item => $"inventory:{item.Sku}:{item.WarehouseId}")
+        return requestedItems
+            .Select(requestedItem => $"inventory:{requestedItem.Sku}:{requestedItem.WarehouseId}")
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToArray();
