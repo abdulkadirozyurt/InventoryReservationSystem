@@ -7,6 +7,7 @@ public sealed class ReservationItem
         Sku = null!;
         WarehouseId = null!;
     }
+
     public ReservationItem(string sku, string warehouseId, int quantity)
     {
         if (string.IsNullOrWhiteSpace(sku))

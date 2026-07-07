@@ -31,7 +31,6 @@ public sealed class InventoryItem
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
-    [BsonId]
     [BsonRepresentation(BsonType.ObjectId)]
     public string? Id { get; private set; }
 

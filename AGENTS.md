@@ -163,7 +163,7 @@ Update this file when a service boundary, communication pattern, or structural c
   - Verilen SKU'ya ait güncel envanter durumunu dönen servis kodu yazılacak.
   - `warehouseId` verilirse tek depo, boş verilirse SKU'nun toplam/genel stok görünümü dönecek şekilde davranış netleştirilecek.
   - Stok sorgularında correlation id ile technical log üretilecek; bulunamayan SKU/depo, geçersiz istek ve transient Mongo hataları ayrı kategorilerle loglanacak.
-- [ ] **Adım 3.2: ReserveBatch(items[]) Metodunun Yazılması (All-or-Nothing)**
+- [x] **Adım 3.2: ReserveBatch(items[]) Metodunun Yazılması (All-or-Nothing)**
   - Deterministik SKU+depo kilit sırasına göre Redis üzerinde kilitler edinilecek.
   - Batch içerisindeki tüm ürünlerin stokları kontrol edilecek. **Eğer tek bir ürünün bile stoku yetersizse, işlem anında iptal edilecek**, edinilen kilitler serbest bırakılacak ve hata dönülecek (Kısmi rezervasyona izin yok).
   - Tüm ürünlerin stoku yeterliyse, ilgili miktarlar `quantityAvailable` alanından düşülüp `quantityReserved` alanına atomik olarak eklenecek.

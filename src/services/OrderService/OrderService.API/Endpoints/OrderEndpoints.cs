@@ -37,17 +37,27 @@ public static class OrderEndpoints
         reserveRequest.Items.AddRange(request.Items.Select(item => new ReservationItem
         {
             Sku = item.Sku,
+            WarehouseId = item.WarehouseId,
             Quantity = item.Quantity
         }));
 
         var reserveResponse = await inventoryClient.ReserveBatchAsync(reserveRequest);
 
-        return Results.Ok(new CreateOrderResponse(reserveResponse.Success, reserveResponse.ReservationId));
+        return Results.Ok(new CreateOrderResponse(
+            reserveResponse.Success,
+            reserveResponse.ReservationId,
+            reserveResponse.Failures.Select(failure => new CreateOrderFailureResponse(
+                failure.Sku,
+                failure.WarehouseId,
+                failure.ErrorCode,
+                failure.Reason)).ToArray()));
     }
 }
 
 public sealed record CreateOrderRequest(IReadOnlyList<CreateOrderItemRequest> Items);
 
-public sealed record CreateOrderItemRequest(string Sku, int Quantity);
+public sealed record CreateOrderItemRequest(string Sku, string WarehouseId, int Quantity);
 
-public sealed record CreateOrderResponse(bool Success, string ReservationId);
+public sealed record CreateOrderResponse(bool Success, string ReservationId, IReadOnlyCollection<CreateOrderFailureResponse> Failures);
+
+public sealed record CreateOrderFailureResponse(string Sku, string WarehouseId, string ErrorCode, string Reason);

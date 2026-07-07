@@ -1,4 +1,4 @@
-﻿using MongoDB.Bson;
+using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 
 namespace InventoryService.Domain.Reservations;
@@ -6,16 +6,16 @@ namespace InventoryService.Domain.Reservations;
 // temporary stock keeping record for an order
 public sealed class Reservation
 {
-    [BsonElement("items")]
-    private List<ReservationItem> _items = [];
     private Reservation()
     {
-        ReservationId = null!;
-        OrderId = null!;
     }
 
-    public Reservation(string reservationId, string orderId, IEnumerable<ReservationItem> items, DateTimeOffset expiresAt)
+    [BsonConstructor]
+    public Reservation(string reservationId, string orderId, List<ReservationItem> items, DateTimeOffset expiresAt)
     {
+        if (items is null)
+            throw new ArgumentNullException(nameof(items));
+
         var itemList = items.ToList();
 
         if (string.IsNullOrWhiteSpace(reservationId))
@@ -32,22 +32,21 @@ public sealed class Reservation
 
         ReservationId = reservationId;
         OrderId = orderId;
-        _items = itemList;
+        Items = itemList;
         Status = ReservationStatus.Pending;
         CreatedAt = DateTimeOffset.UtcNow;
         UpdatedAt = DateTimeOffset.UtcNow;
         ExpiresAt = expiresAt;
     }
 
-    [BsonId]
     [BsonRepresentation(BsonType.ObjectId)]
-    public string? Id { get; private set; }
+    public string Id { get; private set; } = string.Empty;
 
     [BsonElement("reservationId")]
-    public string ReservationId { get; private set; }
+    public string ReservationId { get; private set; } = string.Empty;
 
     [BsonElement("orderId")]
-    public string OrderId { get; private set; }
+    public string OrderId { get; private set; } = string.Empty;
 
     [BsonElement("status")]
     [BsonRepresentation(BsonType.String)]
@@ -62,9 +61,8 @@ public sealed class Reservation
     [BsonElement("updatedAt")]
     public DateTimeOffset UpdatedAt { get; private set; }
 
-    [BsonIgnore]
-    public IReadOnlyCollection<ReservationItem> Items => _items.AsReadOnly();
-
+    [BsonElement("items")]
+    public List<ReservationItem> Items { get; private set; } = [];
 
 
     public void Confirm()
@@ -96,6 +94,4 @@ public sealed class Reservation
         if (Status != ReservationStatus.Pending)
             throw new InvalidOperationException("Reservation can only be confirmed if it is in pending status.");
     }
-
-
 }
