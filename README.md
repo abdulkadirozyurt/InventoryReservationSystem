@@ -71,7 +71,7 @@ flowchart TD
 - **Deterministic Concurrency Control**: Prevents deadlocks under concurrent requests by sorting Redis lock keys lexicographically. Utilizes Polly retry policies for lock acquisition contention.
 - **Transactional Audit Trail**: Every stock movement (`Reserve`, `Release`, `Confirm`, etc.) is recorded as an immutable log in the `InventoryTransactions` collection within the same MongoDB transaction.
 - **Structured Serilog Logging**: Technical logging with named property templates (no string interpolation) written to both the Console and a dedicated MongoDB `ApplicationLogs` collection.
-- **OpenTelemetry & Health Infrastructure**: Integration with .NET Aspire ServiceDefaults, exposing `/health` (liveness) and `/health/ready` (readiness) endpoints mapped to Mongo and Redis states.
+- **OpenTelemetry Metrics & Health Infrastructure**: Integration with .NET Aspire ServiceDefaults, exposing `/health` (liveness) and `/health/ready` (readiness) endpoints mapped to Mongo and Redis states. InventoryService emits low-cardinality metrics for Redis lock acquisition/ownership, TTL exceeded detection, reservation operation duration/failures, time-to-reserve, time-to-confirmation, and operational stock adjustments.
 
 ### Planned Features (Roadmap)
 - **Automatic Expiration Engine**: A background worker that periodically scans for expired `Pending` reservations (10-minute TTL) and releases them, utilizing a MongoDB checkpoint system to resume safely after crashes.

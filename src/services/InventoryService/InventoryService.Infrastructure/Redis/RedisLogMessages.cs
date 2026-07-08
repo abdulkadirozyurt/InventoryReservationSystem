@@ -16,4 +16,7 @@ internal static class RedisLogMessages
 
     public const string DistributedLockReleaseFailed =
         "Redis distributed lock release failed for {LockKey}.";
+
+    public const string DistributedLockHeldTooLong =
+        "Redis distributed lock held longer than TTL. Held for {HeldMs} ms, TTL was {LockTtlMs} ms for {LockKeyCount} lock keys.";
 }

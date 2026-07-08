@@ -1,5 +1,8 @@
+using System.Diagnostics;
 using InventoryService.Application.Inventory.Abstractions;
 using InventoryService.Application.Inventory.Exceptions;
+using InventoryService.Application.Observability;
+using InventoryService.Application.Observability.Abstractions;
 using InventoryService.Application.Reservations.Abstractions;
 using InventoryService.Application.Reservations.Results.Reserve;
 using InventoryService.Domain.Inventory;
@@ -15,8 +18,10 @@ public sealed class ReserveBatchCommandHandler(
     IReservationRepository reservationRepository,
     IInventoryUnitOfWork unitOfWork,
     IDistributedLockService distributedLockService,
+    IInventoryServiceMetrics metrics,
     ILogger<ReserveBatchCommandHandler> logger)
 {
+    private const string OperationName = "reserve_batch";
     private const string ValidationFailure = "VALIDATION_ERROR";
     private const string StockNotFound = "STOCK_NOT_FOUND";
     private const string InsufficientStock = "INSUFFICIENT_STOCK";
@@ -27,14 +32,18 @@ public sealed class ReserveBatchCommandHandler(
 
     public async Task<ReserveBatchResult> HandleAsync(ReserveBatchCommand command, CancellationToken cancellationToken)
     {
+        var startedAt = Stopwatch.GetTimestamp();
         var validationFailures = Validate(command);
 
         if (validationFailures.Count > 0)
         {
+            metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordReservationFailure(OperationName, ValidationFailure, InventoryErrorClass.Validation);
             logger.LogWarning(
-                "Reserve batch validation failed. CorrelationId: {CorrelationId}, FailureCount: {FailureCount}",
+                "Reserve batch validation failed. CorrelationId: {CorrelationId}, FailureCount: {FailureCount}, ErrorClass: {ErrorClass}",
                 command.CorrelationId,
-                validationFailures.Count);
+                validationFailures.Count,
+                InventoryErrorClass.Validation);
 
             return new ReserveBatchResult(false, null, validationFailures);
         }
@@ -95,17 +104,28 @@ public sealed class ReserveBatchCommandHandler(
 
             // If there are any stock failures, return them without making any reservations.
             if (stockFailures.Count > 0)
+            {
+                metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+                metrics.RecordReservationFailure(OperationName, stockFailures[0].ErrorCode, InventoryErrorClass.Business);
                 return new ReserveBatchResult(false, null, stockFailures);
+            }
+
+            var duration = Stopwatch.GetElapsedTime(startedAt);
+            metrics.RecordReservationOperation(OperationName, "success", duration);
+            metrics.RecordTimeToReserve(duration);
 
             return new ReserveBatchResult(true, reservationId, []);
         }
         catch (TimeoutException exception)
         {
+            metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordReservationFailure(OperationName, LockTimeout, InventoryErrorClass.Timeout);
             logger.LogWarning(
                 exception,
-                "Reserve batch lock acquisition timed out. CorrelationId: {CorrelationId}, LockKeyCount: {LockKeyCount}",
+                "Reserve batch lock acquisition timed out. CorrelationId: {CorrelationId}, LockKeyCount: {LockKeyCount}, ErrorClass: {ErrorClass}",
                 command.CorrelationId,
-                inventoryStockLockKeys.Count
+                inventoryStockLockKeys.Count,
+                InventoryErrorClass.Timeout
             );
 
             return new ReserveBatchResult(
@@ -131,21 +151,27 @@ public sealed class ReserveBatchCommandHandler(
         }
         catch (InventoryStoreUnavailableException exception)
         {
+            metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordReservationFailure(OperationName, "InventoryStoreUnavailable", InventoryErrorClass.Transient);
             logger.LogError(
                 exception,
-                "Reserve batch failed due to inventory store unavailability. CorrelationId: {CorrelationId}, ErrorCategory: {ErrorCategory}",
+                "Reserve batch failed due to inventory store unavailability. CorrelationId: {CorrelationId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                 command.CorrelationId,
-                "InventoryStoreUnavailable");
+                "InventoryStoreUnavailable",
+                InventoryErrorClass.Transient);
 
             throw;
         }
         catch (Exception exception)
         {
+            metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordReservationFailure(OperationName, "UnexpectedSystemError", InventoryErrorClass.System);
             logger.LogError(
                 exception,
-                "Reserve batch failed with an unexpected system error. CorrelationId: {CorrelationId}, ErrorCategory: {ErrorCategory}",
+                "Reserve batch failed with an unexpected system error. CorrelationId: {CorrelationId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                 command.CorrelationId,
-                "UnexpectedSystemError");
+                "UnexpectedSystemError",
+                InventoryErrorClass.System);
 
             throw;
         }
@@ -154,9 +180,9 @@ public sealed class ReserveBatchCommandHandler(
 
 
     private async Task PersistSuccessfulReservationAsync(
-        IEnumerable<(InventoryItem StockItem, int Quantity)> stockItemsToReserve, 
-        string reservationId, 
-        ReserveBatchCommand command, 
+        IEnumerable<(InventoryItem StockItem, int Quantity)> stockItemsToReserve,
+        string reservationId,
+        ReserveBatchCommand command,
         CancellationToken cancellationToken)
     {
         var reservationItems = new List<ReservationItem>();

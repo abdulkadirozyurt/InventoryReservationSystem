@@ -1,5 +1,8 @@
+using System.Diagnostics;
 using InventoryService.Application.Inventory.Abstractions;
 using InventoryService.Application.Inventory.Exceptions;
+using InventoryService.Application.Observability;
+using InventoryService.Application.Observability.Abstractions;
 using InventoryService.Application.Reservations.Abstractions;
 using InventoryService.Application.Reservations.Results.Confirm;
 using InventoryService.Domain.Inventory;
@@ -17,16 +20,18 @@ public sealed class ConfirmReservationCommandHandler(
     IReservationRepository reservationRepository,
     IInventoryUnitOfWork inventoryUnitOfWork,
     IDistributedLockService distributedLockService,
+    IInventoryServiceMetrics metrics,
     ILogger<ConfirmReservationCommandHandler> logger)
 {
     // Response error code'ları API contract'a sabit ve aranabilir hata döndürmek için tutulur.
+    private const string OperationName = "confirm_reservation";
     private const string ValidationFailure = "VALIDATION_ERROR";
     private const string ReservationNotFound = "RESERVATION_NOT_FOUND";
     private const string InvalidReservationState = "INVALID_RESERVATION_STATE";
     private const string StockNotFound = "STOCK_NOT_FOUND";
     private const string ReservedStockInsufficient = "RESERVED_STOCK_INSUFFICIENT";
     private const string LockTimeout = "LOCK_TIMEOUT";
-    private const string StoreUnavailable = "STORE_UNAVAILABLE";
+    private const string StoreUnavailable = "INVENTORY_STORE_UNAVAILABLE";
     private const string SystemError = "SYSTEM_ERROR";
 
     // Lock sonsuza kadar kalmasın ve aynı stok için sonsuz beklemeyelim.
@@ -35,15 +40,20 @@ public sealed class ConfirmReservationCommandHandler(
 
     public async Task<ConfirmReservationResult> HandleAsync(ConfirmReservationCommand command, CancellationToken cancellationToken = default)
     {
+        var startedAt = Stopwatch.GetTimestamp();
+
         // Basit input hataları lock/transaction işine girmeden döner.
         var validationResult = Validate(command);
         if (validationResult is not null)
         {
+            metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordReservationFailure(OperationName, ValidationFailure, InventoryErrorClass.Validation);
             logger.LogWarning(
-                "Confirm reservation validation failed. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}",
+                "Confirm reservation validation failed. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                 command.CorrelationId,
                 command.ReservationId,
-                ValidationFailure);
+                ValidationFailure,
+                InventoryErrorClass.Validation);
 
             return validationResult;
         }
@@ -53,40 +63,48 @@ public sealed class ConfirmReservationCommandHandler(
             var reservation = await reservationRepository.GetByReservationIdAsync(command.ReservationId, cancellationToken);
             if (reservation is null)
             {
+                metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+                metrics.RecordReservationFailure(OperationName, ReservationNotFound, InventoryErrorClass.Business);
                 logger.LogWarning(
-                    "Confirm reservation failed because reservation was not found. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}",
+                    "Confirm reservation failed because reservation was not found. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                     command.CorrelationId,
                     command.ReservationId,
-                    ReservationNotFound);
+                    ReservationNotFound,
+                    InventoryErrorClass.Business);
 
                 return new ConfirmReservationResult(false, ReservationNotFound, "Reservation was not found.");
             }
 
             if (reservation.Status == ReservationStatus.Confirmed)
             {
+                metrics.RecordReservationOperation(OperationName, "idempotent", Stopwatch.GetElapsedTime(startedAt));
                 logger.LogInformation(
-                    "Confirm reservation skipped because reservation was already confirmed. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Status: {Status}, ErrorCategory: {ErrorCategory}",
+                    "Confirm reservation skipped because reservation was already confirmed. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Status: {Status}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                     command.CorrelationId,
                     command.ReservationId,
                     reservation.Status,
-                    "IdempotentConfirm");
+                    "IdempotentConfirm",
+                    InventoryErrorClass.Business);
 
                 return new ConfirmReservationResult(true, null, null);
             }
 
             if (reservation.Status != ReservationStatus.Pending)
             {
+                metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+                metrics.RecordReservationFailure(OperationName, InvalidReservationState, InventoryErrorClass.Business);
                 logger.LogWarning(
-                    "Confirm reservation failed because reservation state is invalid. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Status: {Status}, ErrorCategory: {ErrorCategory}",
+                    "Confirm reservation failed because reservation state is invalid. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Status: {Status}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                     command.CorrelationId,
                     command.ReservationId,
                     reservation.Status,
-                    InvalidReservationState);
+                    InvalidReservationState,
+                    InventoryErrorClass.Business);
 
                 return new ConfirmReservationResult(false, InvalidReservationState, "Reservation must be pending to confirm.");
             }
 
-            // ConfirmReservationCommand sadece ReservationId içerdiğinden (ürün listesi taşımadığından), 
+            // ConfirmReservationCommand sadece ReservationId içerdiğinden (ürün listesi taşımadığından),
             // hangi SKU ve Depoların (Warehouse) kilitleneceğini öğrenmek için önce veritabanındaki rezervasyon kaydı okunur.
             var confirmItems = AggregateReservationItems(reservation.Items);
             var inventoryStockLockKeys = CreateInventoryStockLockKeys(confirmItems);
@@ -106,10 +124,11 @@ public sealed class ConfirmReservationCommandHandler(
                 if (currentReservation is null)
                 {
                     logger.LogWarning(
-                        "Confirm reservation transaction failed because reservation was not found. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}",
+                        "Confirm reservation transaction failed because reservation was not found. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                         command.CorrelationId,
                         command.ReservationId,
-                        ReservationNotFound);
+                        ReservationNotFound,
+                        InventoryErrorClass.Business);
 
                     transactionResult = new ConfirmReservationResult(false, ReservationNotFound, "Reservation was not found.");
                     return;
@@ -118,11 +137,12 @@ public sealed class ConfirmReservationCommandHandler(
                 if (currentReservation.Status == ReservationStatus.Confirmed)
                 {
                     logger.LogInformation(
-                        "Confirm reservation transaction skipped because reservation was already confirmed. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Status: {Status}, ErrorCategory: {ErrorCategory}",
+                        "Confirm reservation transaction skipped because reservation was already confirmed. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Status: {Status}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                         command.CorrelationId,
                         command.ReservationId,
                         currentReservation.Status,
-                        "IdempotentConfirm");
+                        "IdempotentConfirm",
+                        InventoryErrorClass.Business);
 
                     transactionResult = new ConfirmReservationResult(true, null, null);
                     return;
@@ -131,11 +151,12 @@ public sealed class ConfirmReservationCommandHandler(
                 if (currentReservation.Status != ReservationStatus.Pending)
                 {
                     logger.LogWarning(
-                        "Confirm reservation transaction failed because reservation state is invalid. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Status: {Status}, ErrorCategory: {ErrorCategory}",
+                        "Confirm reservation transaction failed because reservation state is invalid. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Status: {Status}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                         command.CorrelationId,
                         command.ReservationId,
                         currentReservation.Status,
-                        InvalidReservationState);
+                        InvalidReservationState,
+                        InventoryErrorClass.Business);
 
                     transactionResult = new ConfirmReservationResult(false, InvalidReservationState, "Reservation must be pending to confirm.");
                     return;
@@ -154,12 +175,13 @@ public sealed class ConfirmReservationCommandHandler(
                     if (inventoryItem is null)
                     {
                         logger.LogError(
-                            "Confirm reservation transaction failed because inventory item was not found. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, ErrorCategory: {ErrorCategory}",
+                            "Confirm reservation transaction failed because inventory item was not found. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                             command.CorrelationId,
                             command.ReservationId,
                             reservationItem.Sku,
                             reservationItem.WarehouseId,
-                            StockNotFound);
+                            StockNotFound,
+                            InventoryErrorClass.Business);
 
                         transactionResult = new ConfirmReservationResult(false, StockNotFound, "Stock was not found for reservation item.");
                         return;
@@ -168,14 +190,15 @@ public sealed class ConfirmReservationCommandHandler(
                     if (inventoryItem.QuantityReserved < reservationItem.Quantity)
                     {
                         logger.LogError(
-                            "Confirm reservation transaction failed because reserved stock is insufficient. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, Quantity: {Quantity}, QuantityReserved: {QuantityReserved}, ErrorCategory: {ErrorCategory}",
+                            "Confirm reservation transaction failed because reserved stock is insufficient. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, Quantity: {Quantity}, QuantityReserved: {QuantityReserved}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                             command.CorrelationId,
                             command.ReservationId,
                             reservationItem.Sku,
                             reservationItem.WarehouseId,
                             reservationItem.Quantity,
                             inventoryItem.QuantityReserved,
-                            ReservedStockInsufficient);
+                            ReservedStockInsufficient,
+                            InventoryErrorClass.Business);
 
                         transactionResult = new ConfirmReservationResult(false, ReservedStockInsufficient, "Reserved stock is insufficient for confirm.");
                         return;
@@ -214,16 +237,21 @@ public sealed class ConfirmReservationCommandHandler(
                 transactionResult = new ConfirmReservationResult(true, null, null);
             }, cancellationToken);
 
-            return transactionResult ?? new ConfirmReservationResult(false, SystemError, "Confirm reservation failed due to an unexpected transaction result.");
+            var result = transactionResult ?? new ConfirmReservationResult(false, SystemError, "Confirm reservation failed due to an unexpected transaction result.");
+            RecordResult(result, startedAt, reservation.CreatedAt);
+            return result;
         }
         catch (TimeoutException exception)
         {
+            metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordReservationFailure(OperationName, LockTimeout, InventoryErrorClass.Timeout);
             logger.LogWarning(
                 exception,
-                "Confirm reservation failed while waiting for inventory locks. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}",
+                "Confirm reservation failed while waiting for inventory locks. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                 command.CorrelationId,
                 command.ReservationId,
-                LockTimeout);
+                LockTimeout,
+                InventoryErrorClass.Timeout);
 
             return new ConfirmReservationResult(false, LockTimeout, "Timed out while waiting for inventory locks.");
         }
@@ -239,27 +267,52 @@ public sealed class ConfirmReservationCommandHandler(
         }
         catch (InventoryStoreUnavailableException exception)
         {
+            metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordReservationFailure(OperationName, StoreUnavailable, InventoryErrorClass.Transient);
             // Mongo veya repository tarafındaki transient hata buraya düşer.
             logger.LogError(
                 exception,
-                "Confirm reservation failed due to inventory store unavailability. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}",
+                "Confirm reservation failed due to inventory store unavailability. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                 command.CorrelationId,
                 command.ReservationId,
-                "TransientMongoError");
+                "TransientMongoError",
+                InventoryErrorClass.Transient);
 
             return new ConfirmReservationResult(false, StoreUnavailable, "Inventory store is unavailable.");
         }
         catch (Exception exception)
         {
+            metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordReservationFailure(OperationName, SystemError, InventoryErrorClass.System);
             logger.LogError(
                 exception,
-                "Confirm reservation failed with an unexpected system error. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}",
+                "Confirm reservation failed with an unexpected system error. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                 command.CorrelationId,
                 command.ReservationId,
-                "UnexpectedSystemError");
+                "UnexpectedSystemError",
+                InventoryErrorClass.System);
 
             return new ConfirmReservationResult(false, SystemError, "Confirm reservation failed due to an unexpected system error.");
         }
+    }
+
+    private void RecordResult(ConfirmReservationResult result, long startedAt, DateTime createdAt)
+    {
+        var duration = Stopwatch.GetElapsedTime(startedAt);
+
+        if (result.Success)
+        {
+            metrics.RecordReservationOperation(OperationName, "success", duration);
+            var timeToConfirmation = DateTime.UtcNow - createdAt;
+            if (timeToConfirmation >= TimeSpan.Zero)
+                metrics.RecordTimeToConfirmation(timeToConfirmation);
+
+            return;
+        }
+
+        var errorClass = result.ErrorCode == ValidationFailure ? InventoryErrorClass.Validation : InventoryErrorClass.Business;
+        metrics.RecordReservationOperation(OperationName, "failed", duration);
+        metrics.RecordReservationFailure(OperationName, result.ErrorCode ?? SystemError, errorClass);
     }
 
     // Confirm isteği başlamadan önce zorunlu alanlar dolu mu diye bakar.

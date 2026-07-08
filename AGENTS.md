@@ -196,11 +196,11 @@ Update this file when a service boundary, communication pattern, or structural c
   - `reason` zorunlu tutulacak ve her işlem transaction log'a `AdjustStock` hareketi olarak yazılacak.
   - Her `AdjustStock` işleminde reason, correlation id, SKU/depo ve stok delta bilgisiyle `InventoryTransactions` audit kaydı yazılacak.
   - Negatif stok engeli, validation failure, lock timeout ve admin düzeltmeleri technical log olarak yazılacak.
-- [ ] **Adım 3.6: Metriklerin Enjeksiyonu ve Log Sınıflandırması**
-  - Önceki adımlarda eklenen lock, reservation, release, confirm, adjust stock ve hata logları OpenTelemetry metrikleriyle ilişkilendirilecek.
-  - Lock contention, lock ownership süresi, timeout sayısı ve transient/sistemsel hata ayrımı metrik olarak üretilecek.
-  - Adım 2.3'te tanımlanan lock TTL aşımları ayrı bir metrik/log olarak işaretlenecek (**"beklenenden uzun tutulan lock" tespiti**).
-  - Bu adım feature loglarını ilk kez eklemek için değil, mevcut runtime sinyallerini ölçülebilir hale getirmek için kullanılacak.
+- [x] **Adım 3.6: Metriklerin Enjeksiyonu ve Log Sınıflandırması**
+  - Önceki adımlarda eklenen lock, reservation, release, confirm, adjust stock ve hata logları OpenTelemetry metrikleriyle ilişkilendirildi.
+  - Lock acquisition/ownership süresi, lock timeout/release sonucu, TTL aşımı, reservation operation duration/failure, time-to-reserve, time-to-confirmation ve stock adjustment metrikleri üretildi.
+  - Hata loglarına standart `ErrorClass` alanı eklendi: `validation`, `business`, `timeout`, `transient`, `system`.
+  - Adım 2.3'te tanımlanan lock TTL aşımları ayrı metrik/log olarak işaretleniyor (**"beklenenden uzun tutulan lock" tespiti**).
 
 ### Live Project State
 

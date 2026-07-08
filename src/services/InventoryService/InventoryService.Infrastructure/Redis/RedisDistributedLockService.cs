@@ -1,4 +1,6 @@
-﻿using InventoryService.Application.Reservations.Abstractions;
+﻿using System.Diagnostics;
+using InventoryService.Application.Observability.Abstractions;
+using InventoryService.Application.Reservations.Abstractions;
 using Microsoft.Extensions.Logging;
 using Polly;
 using Polly.Retry;
@@ -9,7 +11,8 @@ namespace InventoryService.Infrastructure.Redis;
 public sealed class RedisDistributedLockService(
     IConnectionMultiplexer connectionMultiplexer,
     ILogger<RedisDistributedLockService> logger,
-    ILoggerFactory loggerFactory) : IDistributedLockService
+    ILoggerFactory loggerFactory,
+    IInventoryServiceMetrics metrics) : IDistributedLockService
 {
     private readonly IDatabase _database = connectionMultiplexer.GetDatabase();
 
@@ -25,6 +28,7 @@ public sealed class RedisDistributedLockService(
     public async Task<IDistributedLockHandle> AcquireAsync(IReadOnlyCollection<string> lockKeys, TimeSpan lockTTL, TimeSpan acquireTimeout, CancellationToken cancellationToken = default)
     {
         var acquiredLockKeys = new List<string>();
+        var acquireStartedAt = Stopwatch.GetTimestamp();
         var lockToken = Guid.NewGuid().ToString("N"); // Generate a unique lock token for this lock acquisition.
         var lockHandleLogger = loggerFactory.CreateLogger<RedisDistributedLockHandle>();
 
@@ -51,16 +55,18 @@ public sealed class RedisDistributedLockService(
                 acquiredLockKeys.Add(lockKey);
             }
 
+            metrics.RecordDistributedLockAcquireSucceeded(Stopwatch.GetElapsedTime(acquireStartedAt));
             logger.LogDebug(RedisLogMessages.DistributedLockAcquired, acquiredLockKeys.Count);
 
-            return new RedisDistributedLockHandle(_database, lockToken, acquiredLockKeys, lockHandleLogger);
+            return new RedisDistributedLockHandle(_database, lockToken, acquiredLockKeys, lockHandleLogger, metrics, lockTTL, Stopwatch.GetTimestamp());
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
             // If we fail to acquire the lock for any key, we need to release all previously acquired locks.
             if (acquiredLockKeys.Count > 0)
-                await new RedisDistributedLockHandle(_database, lockToken, acquiredLockKeys, lockHandleLogger).DisposeAsync();
+                await new RedisDistributedLockHandle(_database, lockToken, acquiredLockKeys, lockHandleLogger, metrics, lockTTL, acquireStartedAt).DisposeAsync();
 
+            metrics.RecordDistributedLockAcquireTimedOut(Stopwatch.GetElapsedTime(acquireStartedAt));
             logger.LogWarning(
                 RedisLogMessages.DistributedLockAcquisitionTimedOut,
                 acquireTimeout.TotalMilliseconds,
@@ -71,6 +77,7 @@ public sealed class RedisDistributedLockService(
         }
         catch (Exception exception)
         {
+            metrics.RecordDistributedLockAcquireFailed(Stopwatch.GetElapsedTime(acquireStartedAt));
             logger.LogError(
                 exception,
                 RedisLogMessages.DistributedLockAcquisitionFailed,
@@ -79,7 +86,7 @@ public sealed class RedisDistributedLockService(
 
             // If we fail to acquire the lock for any key, we need to release all previously acquired locks.
             if (acquiredLockKeys.Count > 0)
-                await new RedisDistributedLockHandle(_database, lockToken, acquiredLockKeys, lockHandleLogger).DisposeAsync();
+                await new RedisDistributedLockHandle(_database, lockToken, acquiredLockKeys, lockHandleLogger, metrics, lockTTL, acquireStartedAt).DisposeAsync();
 
             throw;
         }

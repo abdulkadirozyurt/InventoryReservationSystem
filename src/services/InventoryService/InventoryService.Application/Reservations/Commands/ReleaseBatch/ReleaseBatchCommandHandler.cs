@@ -1,5 +1,8 @@
+using System.Diagnostics;
 using InventoryService.Application.Inventory.Abstractions;
 using InventoryService.Application.Inventory.Exceptions;
+using InventoryService.Application.Observability;
+using InventoryService.Application.Observability.Abstractions;
 using InventoryService.Application.Reservations.Abstractions;
 using InventoryService.Application.Reservations.Results.Release;
 using InventoryService.Domain.InventoryTransactions;
@@ -16,9 +19,11 @@ public sealed class ReleaseBatchCommandHandler(
     IReservationRepository reservationRepository,
     IInventoryUnitOfWork inventoryUnitOfWork,
     IDistributedLockService distributedLockService,
+    IInventoryServiceMetrics metrics,
     ILogger<ReleaseBatchCommandHandler> logger)
 {
     // Response error code'ları API contract'a sabit ve aranabilir hata döndürmek için tutulur.
+    private const string OperationName = "release_batch";
     private const string ValidationFailure = "VALIDATION_ERROR";
     private const string ReservationNotFound = "RESERVATION_NOT_FOUND";
     private const string InvalidReservationState = "INVALID_RESERVATION_STATE";
@@ -36,16 +41,21 @@ public sealed class ReleaseBatchCommandHandler(
 
     public async Task<ReleaseBatchResult> HandleAsync(ReleaseBatchCommand command, CancellationToken cancellationToken)
     {
+        var startedAt = Stopwatch.GetTimestamp();
+
         // Basit input hataları lock/DB işlemine girmeden dönülür.
         var validationResult = Validate(command);
 
         if (validationResult is not null)
         {
+            metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordReservationFailure(OperationName, ValidationFailure, InventoryErrorClass.Validation);
             logger.LogWarning(
-                "Release batch validation failed. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}",
+                "Release batch validation failed. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                 command.CorrelationId,
                 command.ReservationId,
-                ValidationFailure);
+                ValidationFailure,
+                InventoryErrorClass.Validation);
 
             return validationResult;
         }
@@ -58,11 +68,14 @@ public sealed class ReleaseBatchCommandHandler(
             // Reservation yoksa stok üzerinde hiçbir işlem yapılmaz.
             if (reservation is null)
             {
+                metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+                metrics.RecordReservationFailure(OperationName, ReservationNotFound, InventoryErrorClass.Business);
                 logger.LogWarning(
-                    "Release batch failed because reservation was not found. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}",
+                    "Release batch failed because reservation was not found. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                     command.CorrelationId,
                     command.ReservationId,
-                    ReservationNotFound);
+                    ReservationNotFound,
+                    InventoryErrorClass.Business);
 
                 return new ReleaseBatchResult(false, ReservationNotFound, "Reservation not found.");
             }
@@ -70,12 +83,14 @@ public sealed class ReleaseBatchCommandHandler(
             // Release idempotent olmalı; aynı rezervasyon ikinci kez stok değiştirmemeli.
             if (reservation.Status is ReservationStatus.Released or ReservationStatus.Expired)
             {
+                metrics.RecordReservationOperation(OperationName, "idempotent", Stopwatch.GetElapsedTime(startedAt));
                 logger.LogInformation(
-                    "Release batch skipped because reservation was already released. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Status: {Status}, ErrorCategory: {ErrorCategory}",
+                    "Release batch skipped because reservation was already released. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Status: {Status}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                     command.CorrelationId,
                     command.ReservationId,
                     reservation.Status,
-                    "IdempotentRelease");
+                    "IdempotentRelease",
+                    InventoryErrorClass.Business);
 
                 return new ReleaseBatchResult(true, null, null);
             }
@@ -83,12 +98,15 @@ public sealed class ReleaseBatchCommandHandler(
             // Confirmed rezervasyon release edilemez; stok artık satılmış kabul edilir.
             if (reservation.Status is not ReservationStatus.Pending)
             {
+                metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+                metrics.RecordReservationFailure(OperationName, InvalidReservationState, InventoryErrorClass.Business);
                 logger.LogWarning(
-                    "Release batch failed because reservation state is invalid. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Status: {Status}, ErrorCategory: {ErrorCategory}",
+                    "Release batch failed because reservation state is invalid. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, Status: {Status}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                     command.CorrelationId,
                     command.ReservationId,
                     reservation.Status,
-                    InvalidReservationState);
+                    InvalidReservationState,
+                    InventoryErrorClass.Business);
 
                 return new ReleaseBatchResult(false, InvalidReservationState, "Reservation must be pending to release.");
             }
@@ -96,11 +114,14 @@ public sealed class ReleaseBatchCommandHandler(
             // Request item'ları sadece doğrulama içindir; gerçek release kaynağı reservation kaydıdır.
             if (command.Items.Count > 0 && !ItemsMatchReservation(command.Items, reservation.Items))
             {
+                metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+                metrics.RecordReservationFailure(OperationName, ItemMismatch, InventoryErrorClass.Business);
                 logger.LogWarning(
-                    "Release batch failed because request items do not match reservation items. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}",
+                    "Release batch failed because request items do not match reservation items. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                     command.CorrelationId,
                     command.ReservationId,
-                    ItemMismatch);
+                    ItemMismatch,
+                    InventoryErrorClass.Business);
 
                 return new ReleaseBatchResult(false, ItemMismatch, "Request items do not match reservation items.");
             }
@@ -219,17 +240,22 @@ public sealed class ReleaseBatchCommandHandler(
             }, cancellationToken);
 
             // Defensive fallback: callback hiç sonuç yazmazsa belirsiz başarı dönmeyelim.
-            return transactionResult ?? new ReleaseBatchResult(false, SystemError, "Release batch failed due to an unexpected transaction result.");
+            var result = transactionResult ?? new ReleaseBatchResult(false, SystemError, "Release batch failed due to an unexpected transaction result.");
+            RecordResult(result, startedAt);
+            return result;
         }
         catch (TimeoutException exception)
         {
+            metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordReservationFailure(OperationName, LockTimeout, InventoryErrorClass.Timeout);
             // Redis lock zamanında alınamazsa stok işlemine hiç başlanmaz.
             logger.LogWarning(
                 exception,
-                "Release batch failed while waiting for inventory locks. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}",
+                "Release batch failed while waiting for inventory locks. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                 command.CorrelationId,
                 command.ReservationId,
-                LockTimeout);
+                LockTimeout,
+                InventoryErrorClass.Timeout);
 
             return new ReleaseBatchResult(false, LockTimeout, "Timed out while waiting for inventory locks.");
         }
@@ -246,28 +272,49 @@ public sealed class ReleaseBatchCommandHandler(
         }
         catch (InventoryStoreUnavailableException exception)
         {
+            metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordReservationFailure(OperationName, InventoryStoreUnavailable, InventoryErrorClass.Transient);
             // Repository katmanı Mongo transient hatalarını bu exception ile yukarı taşır.
             logger.LogError(
                 exception,
-                "Release batch failed due to inventory store unavailability. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}",
+                "Release batch failed due to inventory store unavailability. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                 command.CorrelationId,
                 command.ReservationId,
-                "TransientMongoError");
+                "TransientMongoError",
+                InventoryErrorClass.Transient);
 
             return new ReleaseBatchResult(false, InventoryStoreUnavailable, "Inventory store is unavailable.");
         }
         catch (Exception exception)
         {
+            metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordReservationFailure(OperationName, SystemError, InventoryErrorClass.System);
             // Beklenmeyen hatalarda detay loglanır ama dışarı genel sistem hatası döner.
             logger.LogError(
                 exception,
-                "Release batch failed with an unexpected system error. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}",
+                "Release batch failed with an unexpected system error. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                 command.CorrelationId,
                 command.ReservationId,
-                "UnexpectedSystemError");
+                "UnexpectedSystemError",
+                InventoryErrorClass.System);
 
             return new ReleaseBatchResult(false, SystemError, "Release batch failed due to an unexpected system error.");
         }
+    }
+
+    private void RecordResult(ReleaseBatchResult result, long startedAt)
+    {
+        var duration = Stopwatch.GetElapsedTime(startedAt);
+
+        if (result.Success)
+        {
+            metrics.RecordReservationOperation(OperationName, "success", duration);
+            return;
+        }
+
+        var errorClass = result.ErrorCode == ValidationFailure ? InventoryErrorClass.Validation : InventoryErrorClass.Business;
+        metrics.RecordReservationOperation(OperationName, "failed", duration);
+        metrics.RecordReservationFailure(OperationName, result.ErrorCode ?? SystemError, errorClass);
     }
 
     private static ReleaseBatchResult? Validate(ReleaseBatchCommand command)

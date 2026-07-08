@@ -1,6 +1,9 @@
+using System.Diagnostics;
 using InventoryService.Application.Inventory.Abstractions;
 using InventoryService.Application.Inventory.Exceptions;
 using InventoryService.Application.Inventory.Results;
+using InventoryService.Application.Observability;
+using InventoryService.Application.Observability.Abstractions;
 using InventoryService.Application.Reservations.Abstractions;
 using InventoryService.Domain.InventoryTransactions;
 using Microsoft.Extensions.Logging;
@@ -12,8 +15,11 @@ public sealed class InventoryStockAdjustmentService(
     IInventoryTransactionRepository inventoryTransactionRepository,
     IInventoryUnitOfWork unitOfWork,
     IDistributedLockService distributedLockService,
+    IInventoryServiceMetrics metrics,
     ILogger<InventoryStockAdjustmentService> logger)
 {
+    private const string IncreaseOperation = "increase_stock";
+    private const string DecreaseOperation = "decrease_stock";
     private const string ValidationFailure = "VALIDATION_ERROR";
     private const string StockNotFound = "STOCK_NOT_FOUND";
     private const string InsufficientStock = "INSUFFICIENT_STOCK";
@@ -60,17 +66,23 @@ public sealed class InventoryStockAdjustmentService(
         bool isIncrease,
         CancellationToken cancellationToken)
     {
+        var startedAt = Stopwatch.GetTimestamp();
+        var operation = isIncrease ? IncreaseOperation : DecreaseOperation;
+
         // Önce basit alanları kontrol ediyoruz, gereksiz lock ve db işi yapmayalım.
         var validationResult = Validate(sku, warehouseId, quantity, reason, correlationId);
         if (validationResult is not null)
         {
+            metrics.RecordStockAdjustment(operation, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordStockAdjustmentFailure(operation, ValidationFailure, InventoryErrorClass.Validation);
             logger.LogWarning(
-                "Stock adjustment validation failed. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, Quantity: {Quantity}, ErrorCategory: {ErrorCategory}, ErrorMessage: {ErrorMessage}",
+                "Stock adjustment validation failed. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, Quantity: {Quantity}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}, ErrorMessage: {ErrorMessage}",
                 correlationId,
                 sku,
                 warehouseId,
                 quantity,
                 validationResult.ErrorCode,
+                InventoryErrorClass.Validation,
                 validationResult.ErrorMessage);
 
             return validationResult;
@@ -93,12 +105,15 @@ public sealed class InventoryStockAdjustmentService(
             var inventoryItem = await inventoryItemRepository.GetBySkuAndWarehouseAsync(sku, warehouseId, cancellationToken);
             if (inventoryItem is null)
             {
+                metrics.RecordStockAdjustment(operation, "failed", Stopwatch.GetElapsedTime(startedAt));
+                metrics.RecordStockAdjustmentFailure(operation, StockNotFound, InventoryErrorClass.Business);
                 logger.LogWarning(
-                    "Stock adjustment failed because inventory item was not found. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, ErrorCategory: {ErrorCategory}",
+                    "Stock adjustment failed because inventory item was not found. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                     correlationId,
                     sku,
                     warehouseId,
-                    StockNotFound);
+                    StockNotFound,
+                    InventoryErrorClass.Business);
 
                 return Failure(StockNotFound, "Inventory item was not found.", sku, warehouseId);
             }
@@ -111,14 +126,17 @@ public sealed class InventoryStockAdjustmentService(
                 // Azaltmada eksi stoka düşmeyi burada erken yakalıyoruz ki boş transaction açılmasın.
                 if (inventoryItem.QuantityAvailable < quantity)
                 {
+                    metrics.RecordStockAdjustment(operation, "failed", Stopwatch.GetElapsedTime(startedAt));
+                    metrics.RecordStockAdjustmentFailure(operation, InsufficientStock, InventoryErrorClass.Business);
                     logger.LogWarning(
-                        "Stock adjustment failed because available stock is insufficient. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, Quantity: {Quantity}, QuantityAvailable: {QuantityAvailable}, ErrorCategory: {ErrorCategory}",
+                        "Stock adjustment failed because available stock is insufficient. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, Quantity: {Quantity}, QuantityAvailable: {QuantityAvailable}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                         correlationId,
                         sku,
                         warehouseId,
                         quantity,
                         inventoryItem.QuantityAvailable,
-                        InsufficientStock);
+                        InsufficientStock,
+                        InventoryErrorClass.Business);
 
                     return Failure(InsufficientStock, "Insufficient stock available.", sku, warehouseId);
                 }
@@ -182,19 +200,24 @@ public sealed class InventoryStockAdjustmentService(
             }, cancellationToken);
 
             // Normalde transactionResult set edilir, set edilmezse beklenmeyen durum sayıyoruz.
-            return transactionResult ?? Failure(SystemError, "Stock adjustment failed due to an unexpected transaction result.", sku, warehouseId);
+            var result = transactionResult ?? Failure(SystemError, "Stock adjustment failed due to an unexpected transaction result.", sku, warehouseId);
+            RecordResult(operation, result, startedAt);
+            return result;
         }
         catch (TimeoutException exception)
         {
+            metrics.RecordStockAdjustment(operation, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordStockAdjustmentFailure(operation, LockTimeout, InventoryErrorClass.Timeout);
             // Lock süresinde alınamazsa stokla oynamıyoruz, güvenli şekilde hata dönüyoruz.
             logger.LogWarning(
                 exception,
-                "Stock adjustment failed while waiting for inventory lock. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, LockKey: {LockKey}, ErrorCategory: {ErrorCategory}",
+                "Stock adjustment failed while waiting for inventory lock. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, LockKey: {LockKey}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                 correlationId,
                 sku,
                 warehouseId,
                 lockKey,
-                LockTimeout);
+                LockTimeout,
+                InventoryErrorClass.Timeout);
 
             return Failure(LockTimeout, "Could not acquire inventory lock in time.", sku, warehouseId);
         }
@@ -212,30 +235,50 @@ public sealed class InventoryStockAdjustmentService(
         }
         catch (InventoryStoreUnavailableException exception)
         {
+            metrics.RecordStockAdjustment(operation, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordStockAdjustmentFailure(operation, InventoryStoreUnavailable, InventoryErrorClass.Transient);
             // Mongo tarafı geçici sorun çıkardıysa client'a kontrollü hata dönüyoruz.
             logger.LogError(
                 exception,
-                "Stock adjustment failed due to inventory store unavailability. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, ErrorCategory: {ErrorCategory}",
+                "Stock adjustment failed due to inventory store unavailability. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                 correlationId,
                 sku,
                 warehouseId,
-                "TransientMongoError");
+                "TransientMongoError",
+                InventoryErrorClass.Transient);
 
             return Failure(InventoryStoreUnavailable, "Inventory store is unavailable.", sku, warehouseId);
         }
         catch (Exception exception)
         {
+            metrics.RecordStockAdjustment(operation, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordStockAdjustmentFailure(operation, SystemError, InventoryErrorClass.System);
             // Bilmediğimiz sistem hatasını yutmuyoruz, loglayıp üst katmana bırakıyoruz.
             logger.LogError(
                 exception,
-                "Stock adjustment failed with an unexpected system error. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, ErrorCategory: {ErrorCategory}",
+                "Stock adjustment failed with an unexpected system error. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, ErrorCategory: {ErrorCategory}, ErrorClass: {ErrorClass}",
                 correlationId,
                 sku,
                 warehouseId,
-                "UnexpectedSystemError");
+                "UnexpectedSystemError",
+                InventoryErrorClass.System);
 
             throw;
         }
+    }
+
+    private void RecordResult(string operation, StockAdjustmentResult result, long startedAt)
+    {
+        var duration = Stopwatch.GetElapsedTime(startedAt);
+
+        if (result.Success)
+        {
+            metrics.RecordStockAdjustment(operation, "success", duration);
+            return;
+        }
+
+        metrics.RecordStockAdjustment(operation, "failed", duration);
+        metrics.RecordStockAdjustmentFailure(operation, result.ErrorCode ?? SystemError, InventoryErrorClass.System);
     }
 
     private static StockAdjustmentResult? Validate(string sku, string warehouseId, int quantity, string reason, string correlationId)
