@@ -7,8 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Folder Include="Orders\" />
-    <Folder Include="Orders\Abstractions\" />
+    <ProjectReference Include="..\OrderService.Domain\OrderService.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Folder Include="Orders\Commands\" />
     <Folder Include="Orders\Queries\" />
   </ItemGroup>

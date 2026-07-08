@@ -1,6 +1,7 @@
 using InventoryReservationSystem.Contracts.Inventory;
 using OrderService.API.Endpoints;
 using OrderService.Infrastructure;
+using OrderService.Infrastructure.CollectionInitializers;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -17,6 +18,8 @@ builder.Services.AddGrpcClient<InventoryReservations.InventoryReservationsClient
 });
 
 var app = builder.Build();
+
+await app.Services.GetRequiredService<MongoCollectionInitializer>().InitializeAsync();
 
 app.UseCorrelationId();
 

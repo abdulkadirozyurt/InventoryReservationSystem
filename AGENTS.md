@@ -158,49 +158,31 @@ Update this file when a service boundary, communication pattern, or structural c
 
 ## 🎯 3. Current Focus & Roadmap
 
-## FAZ 3: InventoryService gRPC İş Mantığının Geliştirilmesi
-*Hedef: All-or-nothing prensibine sahip atomik rezervasyon motorunu inşa etmek.*
+## FAZ 4: OrderService Sipariş Yönetimi ve Dirençli (Resilient) Entegrasyonlar
+*Hedef: Dış dünyaya açık kapıyı oluşturmak ve iç servis yavaşlıklarına karşı sistemi korumak.*
 
-- [x] **Adım 3.1: GetStock(sku) Metodunun Yazılması**
-  - Verilen SKU'ya ait güncel envanter durumunu dönen servis kodu yazılacak.
-  - `warehouseId` verilirse tek depo, boş verilirse SKU'nun toplam/genel stok görünümü dönecek şekilde davranış netleştirilecek.
-  - Stok sorgularında correlation id ile technical log üretilecek; bulunamayan SKU/depo, geçersiz istek ve transient Mongo hataları ayrı kategorilerle loglanacak.
-- [x] **Adım 3.2: ReserveBatch(items[]) Metodunun Yazılması (All-or-Nothing)**
-  - Deterministik SKU+depo kilit sırasına göre Redis üzerinde kilitler edinilecek.
-  - Batch içerisindeki tüm ürünlerin stokları kontrol edilecek. **Eğer tek bir ürünün bile stoku yetersizse, işlem anında iptal edilecek**, edinilen kilitler serbest bırakılacak ve hata dönülecek (Kısmi rezervasyona izin yok).
-  - Tüm ürünlerin stoku yeterliyse, ilgili miktarlar `quantityAvailable` alanından düşülüp `quantityReserved` alanına atomik olarak eklenecek.
-  - Başarılı işlemde `Reservations` koleksiyonuna `Pending` durumunda, `expiresAt = createdAt + 10 dakika` olacak şekilde rezervasyon kaydı yazılacak.
-  - Başarılı rezervasyonlarda `InventoryTransactions` koleksiyonuna `Reserve` audit kaydı yazılacak.
-  - Stok yetersizliği, lock timeout, transaction rollback, cancellation ve transient Mongo/Redis hataları correlation id ile technical log olarak yazılacak.
-  - Aynı SKU'ları veya kesişen SKU/depo setlerini hedefleyen eş zamanlı batch'lerin, lock sırası sayesinde birbirini bekleyip sırayla işlenmesi ve hiçbirinin overbooking'e yol açmaması garanti altına alınacak.
-- [x] **Adım 3.3: ReleaseBatch(items[]) Metodunun Yazılması**
-  - Aynı deterministik SKU+depo kilit sırasını kullanarak rezervasyonları serbest bırakacak (Stoku geri iade edecek) metot yazılacak.
-  - `Release` hareketinde `quantityReserved` azaltılacak ve `quantityAvailable` aynı miktarda artırılacak.
-  - `Reservations` kaydı `Released` veya expiry akışından geliyorsa `Expired` durumuna geçirilecek.
-  - Başarılı release/expiry işlemlerinde `InventoryTransactions` koleksiyonuna `Release` audit kaydı yazılacak.
-  - Duplicate/idempotent release denemeleri, release edilmeyen rezervasyonlar, lock timeout ve transient hatalar correlation id ile loglanacak.
-  - **İdempotent Kontrol:** Aynı rezervasyonun ikinci kez release edilmesi Redis ve/veya `Reservations.status` üzerinden kontrol edilerek engellenecek.
-- [x] **Adım 3.4: ConfirmReservation(reservationId) Metodunun Yazılması**
-  - `reservationId` ile dahili `Reservations` kaydı bulunacak ve durumun `Pending` olduğu doğrulanacak.
-  - Rezervasyon içindeki SKU+depo anahtarları deterministik sırayla lock edilecek.
-  - Confirm işleminde yalnızca `quantityReserved` azaltılacak; `quantityAvailable` geri artırılmayacak.
-  - Rezervasyon `Confirmed` durumuna geçirilecek ve transaction log'a `Confirm` hareketi yazılacak.
-  - Başarılı confirm işlemlerinde `InventoryTransactions` koleksiyonuna `Confirm` audit kaydı yazılacak.
-  - Duplicate confirm, geçersiz reservation state, lock timeout ve transient hatalar correlation id ile loglanacak.
-  - Aynı rezervasyonun tekrar confirm edilmesi idempotent kabul edilecek; duplicate confirm stok miktarını ikinci kez değiştirmeyecek.
-- [x] **Adım 3.5: AdjustStock(sku, warehouseId, delta, reason) Metodunun Yazılması**
-  - Bu metot sadece admin/operasyonel envanter düzeltmeleri için kullanılacak; order rezervasyon akışının parçası olmayacak.
-  - gRPC dış yüzeyinde bu yetenek `IncreaseStock(sku, warehouseId, quantity, reason)` ve `DecreaseStock(sku, warehouseId, quantity, reason)` olarak ayrıldı; audit/business kategorisi `AdjustStock` olarak kaldı.
-  - İlgili SKU+depo anahtarı deterministik lock ile korunacak.
-  - `IncreaseStock` stok artırır, `DecreaseStock` stok azaltır; işlem sonrası `quantityAvailable` ve `quantityReserved` negatif olamayacak.
-  - `reason` zorunlu tutulacak ve her işlem transaction log'a `AdjustStock` hareketi olarak yazılacak.
-  - Her `AdjustStock` işleminde reason, correlation id, SKU/depo ve stok delta bilgisiyle `InventoryTransactions` audit kaydı yazılacak.
-  - Negatif stok engeli, validation failure, lock timeout ve admin düzeltmeleri technical log olarak yazılacak.
-- [x] **Adım 3.6: Metriklerin Enjeksiyonu ve Log Sınıflandırması**
-  - Önceki adımlarda eklenen lock, reservation, release, confirm, adjust stock ve hata logları OpenTelemetry metrikleriyle ilişkilendirildi.
-  - Lock acquisition/ownership süresi, lock timeout/release sonucu, TTL aşımı, reservation operation duration/failure, time-to-reserve, time-to-confirmation ve stock adjustment metrikleri üretildi.
-  - Hata loglarına standart `ErrorClass` alanı eklendi: `validation`, `business`, `timeout`, `transient`, `system`.
-  - Adım 2.3'te tanımlanan lock TTL aşımları ayrı metrik/log olarak işaretleniyor (**"beklenenden uzun tutulan lock" tespiti**).
+- [X] **Adım 4.1: Sipariş Veri Modeli ve Tarihçe (MongoDB)**
+  - `Order` ve `OrderLineItem` (sku, requested quantity, reserved quantity, warehouseId) şemaları tasarlandı.
+  - Domain tarafında kafa karışıklığını önlemek için sipariş dış kimliği `OrderNumber`, InventoryService rezervasyon bağı ise `reservationId` olarak ayrıldı.
+  - OrderService MongoDB üzerinde `orders` ve `order-history` koleksiyonları collection validation ve indexlerle oluşturuluyor.
+  - Tüm durum geçişlerini (`Pending`, `Confirmed`, `Cancelled`, `Expired`) timestamp ile kaydeden `OrderHistory` audit trail modeli kuruldu.
+  - Order status değişimleri için timestamp, correlation id ve değişim nedeni alanları hazırlandı; endpoint business akışında kullanılması Adım 4.2 kapsamına bırakıldı.
+- [ ] **Adım 4.2: Minimal API İskeletinin Kurulması**
+  - Create Order, Get Order, Cancel Order, Bulk Cancel (Tek istekte çoklu iptal), List Orders (Status ve tarih filtresiyle) ve Order Confirmation endpoint'leri boş fonksiyonlar olarak tanımlanacak.
+  - Order Confirmation endpoint'i, order `Confirmed` yapılmadan önce InventoryService üzerinde `ConfirmReservation(reservationId)` çağıracak.
+  - Cancel Order ve Bulk Cancel endpoint'leri her order'ın `reservationId` değeri için `ReleaseBatch` çağıracak; bulk cancel tek HTTP isteği olsa bile InventoryService tarafında release işlemi rezervasyon bazında idempotent kalacak.
+  - Create, cancel, bulk cancel, confirm ve get/list endpointlerinde request başlangıç/bitiş, hata, correlation id ve dış gRPC çağrı sonucu technical log olarak yazılacak.
+- [ ] **Adım 4.3: Redis Tabanlı İdempotency Katmanı**
+  - Create Order endpoint'ine gelen isteklerin `Idempotency-Key` başlığı Redis üzerinde kontrol edilecek.
+  - Aynı isteğin **her tekrarında** (tekrar sayısı sınırsız — 5 kez, 50 kez fark etmez), veritabanına veya gRPC'ye tekrar gitmeden hafızadaki aynı sonuç doğrudan dönülecek. ("5 keze kadar" gibi bir üst sınır yok; idempotency garantisi tekrar sayısından bağımsız olacak.)
+  - Idempotency hit/miss, replay response, key conflict, Redis timeout ve cache write/read failure durumları correlation id ile loglanacak.
+- [ ] **Adım 4.4: Polly ile gRPC İletişiminin Güvenli Hale Getirilmesi**
+  - OrderService, InventoryService'i ararken `ReserveBatch`, `ReleaseBatch`, `ConfirmReservation`, `GetStock` ve gerekli operasyonel envanter çağrıları için Polly politikalarını kullanacak.
+  - InventoryService tarafında global gRPC exception interceptor eklenecek; system exception'lar şu an loglanıp rethrow ediliyor, interceptor olmadan client'a uygun gRPC status code dönmeyebilir.
+  - OrderService tarafında `RpcException` uygun HTTP cevaplarına (ör. `Unavailable` -> 503, timeout -> 504) maplenecek.
+  - Geçici hatalar için **Retry**, InventoryService yavaşladığında veya çöktüğünde sistemi yormamak için **Circuit Breaker** (Devre Kesici) mekanizmaları devreye alınacak.
+  - Retry denemeleri, timeout, circuit breaker open/half-open/closed durum değişimleri ve fallback/ret kararları technical log olarak yazılacak.
+  - **Graceful Degradation davranışı somut olarak tanımlanacak:** Circuit breaker "open" durumundayken gelen create-order istekleri; (a) hemen 503/kullanıcı dostu hata ile reddedilecek ve istemciye tekrar deneme önerisi dönecek, (b) sistem InventoryService'in son bilinen durumuna göre kaba bir ön-kontrol yapmayacak (stale veriyle yanlış onay vermemek için) — yani InventoryService erişilemezken order "Pending" olarak bile açılmayacak, sadece açıkça reddedilecek. Bu davranış test edilebilir bir kural olarak dokümante edilecek.
 
 ### Live Project State
 
