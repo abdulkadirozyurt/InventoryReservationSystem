@@ -31,7 +31,7 @@ flowchart TD
     OrderAPI -->|gRPC / Protobuf| InvAPI[InventoryService.API]
 
     subgraph Inventory Boundary
-        InvAPI -->|GetStock / ReserveBatch| InvApp[InventoryService.Application]
+        InvAPI -->|GetStock / ReserveBatch / Stock Adjustments| InvApp[InventoryService.Application]
         InvApp -->|Distributed Locks| Redis[(Redis)]
         InvApp -->|Transactions & State| Mongo[(MongoDB Replica Set)]
         InvApp -->|Technical Logs| Serilog[Serilog Sink]
@@ -67,6 +67,7 @@ flowchart TD
 - **Atomic Batch Reservation (`ReserveBatch`)**: All-or-nothing batch reservation engine protected by distributed locks.
 - **Idempotent Reservation Release (`ReleaseBatch`)**: Frees reserved inventory back to available stock. Validates against the database-stored reservation state rather than user input to guarantee idempotency.
 - **Idempotent Reservation Confirmation (`ConfirmReservation`)**: Converts a pending reservation to a permanent sale. Deducts the reserved count without affecting available stock.
+- **Operational Stock Adjustments (`IncreaseStock` / `DecreaseStock`)**: Allows admin/operational corrections for a SKU+warehouse pair under the same Redis lock and MongoDB transaction pattern, writing `AdjustStock` audit records with mandatory reasons.
 - **Deterministic Concurrency Control**: Prevents deadlocks under concurrent requests by sorting Redis lock keys lexicographically. Utilizes Polly retry policies for lock acquisition contention.
 - **Transactional Audit Trail**: Every stock movement (`Reserve`, `Release`, `Confirm`, etc.) is recorded as an immutable log in the `InventoryTransactions` collection within the same MongoDB transaction.
 - **Structured Serilog Logging**: Technical logging with named property templates (no string interpolation) written to both the Console and a dedicated MongoDB `ApplicationLogs` collection.
@@ -279,7 +280,7 @@ During the development of this prototype, several key distributed architecture i
 
 - **No Order Storage**: `OrderService` does not have a database and does not persist orders. It functions purely as a gRPC client gateway.
 - **No Automatic Cleanup**: The background worker that expires `Pending` reservations after 10 minutes is defined in the roadmap but has not yet been built. Currently, reservations do not expire automatically.
-- **Placeholder Methods**: The gRPC operations for adjusting stock (`IncreaseStock`, `DecreaseStock`), rebalancing warehouses, and creating/restoring snapshots are currently stubs that return successful response placeholders.
+- **Placeholder Methods**: The advanced operational gRPC operations for rebalancing warehouses and creating/restoring snapshots are currently stubs that return successful response placeholders.
 - **No Tests**: Automated tests are missing and will be introduced in the final roadmap phases.
 
 ---

@@ -63,7 +63,18 @@ public sealed class InventoryStockAdjustmentService(
         // Önce basit alanları kontrol ediyoruz, gereksiz lock ve db işi yapmayalım.
         var validationResult = Validate(sku, warehouseId, quantity, reason, correlationId);
         if (validationResult is not null)
+        {
+            logger.LogWarning(
+                "Stock adjustment validation failed. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, Quantity: {Quantity}, ErrorCategory: {ErrorCategory}, ErrorMessage: {ErrorMessage}",
+                correlationId,
+                sku,
+                warehouseId,
+                quantity,
+                validationResult.ErrorCode,
+                validationResult.ErrorMessage);
+
             return validationResult;
+        }
 
         // Reserve/Release ile aynı stok satırını korumak için aynı lock key formatını kullanıyoruz.
         var lockKey = $"inventory:{sku}:{warehouseId}";
@@ -77,56 +88,60 @@ public sealed class InventoryStockAdjustmentService(
                 LockWaitTimeout,
                 cancellationToken);
 
-            StockAdjustmentResult? transactionResult = null;
-
-            // Stok update ve audit aynı transaction içinde olsun, biri yazılıp diğeri kalmasın.
-            await unitOfWork.ExecuteInTransactionAsync(async transactionCancellationToken =>
+            // İlgili SKU+depo kaydını buluyoruz, yoksa düzeltilecek stok yok demektir.
+            // Transaction başlamadan önce bunu yapıyoruz ki boşuna transaction açıp kapatmayalım.
+            var inventoryItem = await inventoryItemRepository.GetBySkuAndWarehouseAsync(sku, warehouseId, cancellationToken);
+            if (inventoryItem is null)
             {
-                // İlgili SKU+depo kaydını buluyoruz, yoksa düzeltilecek stok yok demektir.
-                var inventoryItem = await inventoryItemRepository.GetBySkuAndWarehouseAsync(sku, warehouseId, transactionCancellationToken);
-                if (inventoryItem is null)
+                logger.LogWarning(
+                    "Stock adjustment failed because inventory item was not found. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, ErrorCategory: {ErrorCategory}",
+                    correlationId,
+                    sku,
+                    warehouseId,
+                    StockNotFound);
+
+                return Failure(StockNotFound, "Inventory item was not found.", sku, warehouseId);
+            }
+
+            // Audit için available delta değerini burada netleştiriyoruz.
+            var quantityAvailableDelta = isIncrease ? quantity : -quantity;
+
+            if (!isIncrease)
+            {
+                // Azaltmada eksi stoka düşmeyi burada erken yakalıyoruz ki boş transaction açılmasın.
+                if (inventoryItem.QuantityAvailable < quantity)
                 {
                     logger.LogWarning(
-                        "Stock adjustment failed because inventory item was not found. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, ErrorCategory: {ErrorCategory}",
+                        "Stock adjustment failed because available stock is insufficient. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, Quantity: {Quantity}, QuantityAvailable: {QuantityAvailable}, ErrorCategory: {ErrorCategory}",
                         correlationId,
                         sku,
                         warehouseId,
-                        StockNotFound);
+                        quantity,
+                        inventoryItem.QuantityAvailable,
+                        InsufficientStock);
 
-                    transactionResult = Failure(StockNotFound, "Inventory item was not found.", sku, warehouseId);
-                    return;
+                    return Failure(InsufficientStock, "Insufficient stock available.", sku, warehouseId);
                 }
+            }
 
-                // Audit için available delta değerini burada netleştiriyoruz.
-                var quantityAvailableDelta = isIncrease ? quantity : -quantity;
+            // Artırma veya azaltma işlemini yapıyoruz.
+            if (isIncrease)
+            {
+                // Artırmada sadece available artar, reserved tarafına dokunmuyoruz.
+                inventoryItem.IncreaseStock(quantity);
+            }
+            else
+            {
+                // Azaltmada available azalır, reserved yine aynı kalır.
+                inventoryItem.DecreaseStock(quantity);
+            }
 
-                if (isIncrease)
-                {
-                    // Artırmada sadece available artar, reserved tarafına dokunmuyoruz.
-                    inventoryItem.IncreaseStock(quantity);
-                }
-                else
-                {
-                    // Azaltmada eksi stoka düşmeyi burada erken yakalıyoruz, domain de yine koruyor.
-                    if (quantity > inventoryItem.QuantityAvailable)
-                    {
-                        logger.LogWarning(
-                            "Stock adjustment failed because available stock is insufficient. CorrelationId: {CorrelationId}, Sku: {Sku}, WarehouseId: {WarehouseId}, Quantity: {Quantity}, QuantityAvailable: {QuantityAvailable}, ErrorCategory: {ErrorCategory}",
-                            correlationId,
-                            sku,
-                            warehouseId,
-                            quantity,
-                            inventoryItem.QuantityAvailable,
-                            InsufficientStock);
+            StockAdjustmentResult? transactionResult = null;
 
-                        transactionResult = Failure(InsufficientStock, "Insufficient stock available.", sku, warehouseId);
-                        return;
-                    }
-
-                    // Azaltmada available azalır, reserved yine aynı kalır.
-                    inventoryItem.DecreaseStock(quantity);
-                }
-
+            // Stok update ve audit aynı transaction içinde olsun, biri yazılıp diğeri kalmasın.
+            // Sadece gerekli kontroller geçilince transaction başlatıyoruz ki boş commit olmasın.
+            await unitOfWork.ExecuteInTransactionAsync(async transactionCancellationToken =>
+            {
                 // Değişen inventory item kaydını transaction içinde yazıyoruz.
                 await inventoryItemRepository.UpdateAsync(inventoryItem, transactionCancellationToken);
 

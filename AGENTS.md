@@ -188,10 +188,11 @@ Update this file when a service boundary, communication pattern, or structural c
   - Başarılı confirm işlemlerinde `InventoryTransactions` koleksiyonuna `Confirm` audit kaydı yazılacak.
   - Duplicate confirm, geçersiz reservation state, lock timeout ve transient hatalar correlation id ile loglanacak.
   - Aynı rezervasyonun tekrar confirm edilmesi idempotent kabul edilecek; duplicate confirm stok miktarını ikinci kez değiştirmeyecek.
-- [ ] **Adım 3.5: AdjustStock(sku, warehouseId, delta, reason) Metodunun Yazılması**
+- [x] **Adım 3.5: AdjustStock(sku, warehouseId, delta, reason) Metodunun Yazılması**
   - Bu metot sadece admin/operasyonel envanter düzeltmeleri için kullanılacak; order rezervasyon akışının parçası olmayacak.
+  - gRPC dış yüzeyinde bu yetenek `IncreaseStock(sku, warehouseId, quantity, reason)` ve `DecreaseStock(sku, warehouseId, quantity, reason)` olarak ayrıldı; audit/business kategorisi `AdjustStock` olarak kaldı.
   - İlgili SKU+depo anahtarı deterministik lock ile korunacak.
-  - `delta` pozitifse stok artırma, negatifse stok azaltma yapılacak; işlem sonrası `quantityAvailable` ve `quantityReserved` negatif olamayacak.
+  - `IncreaseStock` stok artırır, `DecreaseStock` stok azaltır; işlem sonrası `quantityAvailable` ve `quantityReserved` negatif olamayacak.
   - `reason` zorunlu tutulacak ve her işlem transaction log'a `AdjustStock` hareketi olarak yazılacak.
   - Her `AdjustStock` işleminde reason, correlation id, SKU/depo ve stok delta bilgisiyle `InventoryTransactions` audit kaydı yazılacak.
   - Negatif stok engeli, validation failure, lock timeout ve admin düzeltmeleri technical log olarak yazılacak.
