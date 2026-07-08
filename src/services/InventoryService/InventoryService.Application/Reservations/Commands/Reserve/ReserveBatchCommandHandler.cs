@@ -1,13 +1,13 @@
 using InventoryService.Application.Inventory.Abstractions;
 using InventoryService.Application.Inventory.Exceptions;
 using InventoryService.Application.Reservations.Abstractions;
-using InventoryService.Application.Reservations.Results;
+using InventoryService.Application.Reservations.Results.Reserve;
 using InventoryService.Domain.Inventory;
 using InventoryService.Domain.InventoryTransactions;
 using InventoryService.Domain.Reservations;
 using Microsoft.Extensions.Logging;
 
-namespace InventoryService.Application.Reservations.Commands;
+namespace InventoryService.Application.Reservations.Commands.Reserve;
 
 public sealed class ReserveBatchCommandHandler(
     IInventoryItemRepository inventoryItemRepository,

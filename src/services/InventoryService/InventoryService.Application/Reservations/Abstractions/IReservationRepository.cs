@@ -10,4 +10,20 @@ public interface IReservationRepository
     /// <param name="reservation">The reservation to add.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task AddAsync(Reservation reservation, CancellationToken cancellationToken = default);
+
+    
+    /// <summary>
+    /// Gets a reservation by its public reservation identifier.
+    /// </summary>
+    /// <param name="reservationId">The reservation identifier to query.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The matching reservation, or null when no reservation exists.</returns>
+    Task<Reservation?> GetByIdAsync(string reservationId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persists changes made to an existing reservation.
+    /// </summary>
+    /// <param name="reservation">The reservation to update.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task UpdateAsync(Reservation reservation, CancellationToken cancellationToken = default);
 }

@@ -1,4 +1,4 @@
-﻿namespace InventoryService.Application.Reservations.Results;
+﻿namespace InventoryService.Application.Reservations.Results.Reserve;
 
 public sealed record ReserveBatchResult(
     bool Success,

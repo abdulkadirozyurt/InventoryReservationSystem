@@ -1,7 +1,7 @@
 using Grpc.Core;
 using InventoryReservationSystem.Contracts.Inventory;
 using InventoryService.Application.Inventory.Queries;
-using InventoryService.Application.Reservations.Commands;
+using InventoryService.Application.Reservations.Commands.Reserve;
 
 namespace InventoryService.API.Grpc;
 
