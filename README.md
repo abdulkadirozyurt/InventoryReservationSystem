@@ -1,255 +1,310 @@
 # Inventory Reservation System
 
-Inventory Reservation System is an early-stage .NET microservice prototype for reserving stock for orders.
+An atomic batch-reservation microservice prototype built on **.NET 10**, featuring distributed lock management, transactional consistency, and integrated telemetry.
 
-Goal: keep order management and inventory reservation separate, then connect them through gRPC. MongoDB collection schemas, technical logging, Redis distributed lock infrastructure, stock lookup, real ReserveBatch reservation behavior, idempotent ReleaseBatch stock restoration, and idempotent ConfirmReservation support are in place. Expiry and operational reservation workflows are still in progress.
+---
 
-## Current status
+## Overview
 
-- Phase: early infrastructure/prototype.
-- Two API services exist: `OrderService.API` and `InventoryService.API`.
-- Shared gRPC contract project exists and generates C# stubs from physically split proto files under `src/contracts/InventoryReservationSystem.Contracts/Protos`.
-- `OrderService.API` exposes a minimal order creation endpoint and calls `InventoryService.API` over gRPC.
-- `InventoryService.API` exposes a gRPC service; `GetStock(sku, warehouseId?)`, `ReserveBatch(items[])`, `ReleaseBatch(reservationId, items[])`, and `ConfirmReservation(reservationId)` are wired to Application and MongoDB. Operational methods still use placeholder responses.
-- InventoryService initializes MongoDB schemas for `InventoryItems`, `Reservations`, and `InventoryTransactions` with validation rules and indexes.
-- InventoryService has Redis distributed lock infrastructure with deterministic lock ordering, Polly retry, lock TTL, safe token-based release, and structured Serilog lock logs.
-- InventoryService writes technical logs through Serilog to console and MongoDB `ApplicationLogs`.
-- .NET Aspire AppHost exists for API orchestration only.
-- Docker Compose exists for both APIs, MongoDB replica-set startup, Redis, and RedisInsight.
-- ServiceDefaults provides shared OpenTelemetry configuration, gRPC client instrumentation, service discovery, HTTP resilience defaults, CorrelationId middleware, and development-only `/health` and `/alive` endpoints.
-- Tests are not present yet.
-- Prometheus, Loki, Tempo, Grafana, reservation expiry, operational inventory flows, and stress validation are still roadmap items.
+In distributed systems, managing inventory reservations across multiple products (SKUs) and warehouses is challenging. Classic databases locks can lead to performance bottlenecks or deadlocks, while optimistic concurrency control can fail under high throughput.
 
-## Architecture
+This project implements a **two-service microservices architecture** that handles **atomic batch reservations** using **all-or-nothing** semantics:
+- Either all requested items are reserved successfully in the requested quantities.
+- Or the entire request fails, leaving stock levels untouched (no partial reservations are permitted).
 
-The repository follows a service-oriented Clean Architecture shape:
+To prevent concurrency issues and race conditions, the system utilizes a **deterministic distributed lock ordering** pattern in Redis combined with MongoDB transactions.
 
-- `OrderService` is the public REST entry point for orders.
-- `InventoryService` owns inventory and reservation operations.
-- Services communicate through gRPC contracts in `src/contracts/InventoryReservationSystem.Contracts`.
-- Domain/Application/Infrastructure projects exist for both services, but most business logic is not implemented yet.
-- `OrderService` must not access InventoryService-owned MongoDB collections or Redis state directly. Inventory operations go through gRPC.
+---
 
-```mermaid
-flowchart LR
-    Client[Client] -->|REST POST /api/orders| OrderAPI[OrderService.API]
-    OrderAPI -->|gRPC ReserveBatch| InventoryAPI[InventoryService.API]
-    InventoryAPI ---> Mongo[(MongoDB)]
-    InventoryAPI -->|distributed locks| Redis[(Redis)]
-    OrderAPI -. future .-> OrderDb[(MongoDB orders)]
-```
+## Architecture & Flow
 
-> Solid arrows show active service calls, databases, and infrastructure integrations. Order database integration and real reservation business rules are not fully implemented yet.
-
-## Service boundaries
-
-### OrderService
-
-Current responsibility:
-
-- Accept order creation requests.
-- Translate order items into an inventory reservation request.
-- Call `InventoryService` through generated gRPC client.
-
-Current endpoint:
-
-- `POST /api/orders`
-
-Current limitation:
-
-- No order persistence, idempotency handling, confirmation, cancellation, or status query flow is implemented yet.
-
-### InventoryService
-
-Current responsibility:
-
-- Host the `InventoryReservations` gRPC service.
-- Initialize MongoDB collections for inventory items, reservations, and inventory transaction history.
-- Write technical application logs through Serilog.
-- Provide Redis distributed lock infrastructure for future reservation flows.
-- Run real `GetStock`, `ReserveBatch`, `ReleaseBatch`, and `ConfirmReservation` inventory flows through Application handlers.
-
-Current gRPC methods:
-
-- `ReserveBatch`
-- `ReleaseBatch`
-- `ConfirmReservation`
-- `GetStock`
-- `IncreaseStock`
-- `DecreaseStock`
-- `RebalanceWarehouse` (Phase 5 signature only)
-- `CreateInventorySnapshot` (Phase 5 signature only)
-- `RestoreInventorySnapshot` (Phase 5 signature only)
-
-Proto files:
-
-- `inventory.proto`: main gRPC service entry file.
-- `inventory_common.proto`: shared metadata, reservation item, and failure messages.
-- `inventory_reservations.proto`: reservation request/response messages.
-- `inventory_stock.proto`: stock lookup and stock adjustment messages.
-- `inventory_operations.proto`: warehouse rebalancing and snapshot/restore messages.
+The system consists of two main services and multiple infrastructure components, structured around clean architecture principles and communicating via gRPC.
 
 ```mermaid
 flowchart TD
-    inventory["inventory.proto\nservice InventoryReservations"] --> reservations["inventory_reservations.proto\nReserveBatch / ReleaseBatch / ConfirmReservation"]
-    inventory --> stock["inventory_stock.proto\nGetStock / IncreaseStock / DecreaseStock"]
-    inventory --> operations["inventory_operations.proto\nRebalance / Snapshot / Restore"]
-    reservations --> common["inventory_common.proto\nmetadata / shared messages"]
-    stock --> common
-    operations --> common
+    Client[Client / Caller] -->|REST POST /api/orders| OrderAPI[OrderService.API]
+    
+    subgraph Order Boundary
+        OrderAPI -->|HTTP Trace Context| OrderDefaults[ServiceDefaults]
+    end
+
+    OrderAPI -->|gRPC / Protobuf| InvAPI[InventoryService.API]
+
+    subgraph Inventory Boundary
+        InvAPI -->|GetStock / ReserveBatch| InvApp[InventoryService.Application]
+        InvApp -->|Distributed Locks| Redis[(Redis)]
+        InvApp -->|Transactions & State| Mongo[(MongoDB Replica Set)]
+        InvApp -->|Technical Logs| Serilog[Serilog Sink]
+    end
+
+    subgraph Observability Suite
+        OrderDefaults -.-> Alloy[Grafana Alloy]
+        InvAPI -.-> Alloy
+        Alloy --> Prometheus[(Prometheus)]
+        Alloy --> Loki[(Grafana Loki)]
+        Alloy --> Tempo[(Grafana Tempo)]
+        Prometheus --> Grafana[Grafana Dashboard]
+        Loki --> Grafana
+        Tempo --> Grafana
+    end
 ```
 
-Current `GetStock` behavior:
+### Flow Breakdown
+1. **REST Request**: A client submits an order creation payload containing a batch of SKUs, warehouse IDs, and quantities to `OrderService.API` (`POST /api/orders`).
+2. **Context Propagation**: `CorrelationId` and W3C trace contexts are generated or extracted from headers and propagated downstream.
+3. **gRPC Delegation**: `OrderService.API` acts as a gateway, calling the `InventoryReservations` gRPC service implemented by `InventoryService.API`.
+4. **Deterministic Lock Acquisition**: The inventory engine extracts unique keys for each SKU+Warehouse combination, sorts them alphabetically, and acquires locks sequentially from Redis.
+5. **Atomic Consistency Check**: Under the protection of the locks, a MongoDB replica-set transaction is opened. The system validates whether all requested stocks exist and are sufficient. If a single SKU is insufficient, the transaction rolls back, all locks are released, and a batch failure is returned.
+6. **Audit and Persistence**: If all stocks are valid, stock balances are adjusted, a `Pending` reservation is recorded, audit records are written to `InventoryTransactions`, and the transaction commits.
+7. **Telemetry Tracking**: Telemetry data (logs, metrics, and distributed traces) are automatically collected and shipped via Grafana Alloy to Prometheus, Loki, and Tempo.
 
-- `warehouseId` provided: returns the matching SKU/warehouse stock.
-- `warehouseId` omitted: aggregates the SKU stock across warehouses.
-- Empty SKU returns `INVALID_REQUEST`.
-- Missing stock returns `STOCK_NOT_FOUND`.
-- Transient inventory-store failures are logged with `ErrorCategory=TransientMongoError` and returned as `INVENTORY_STORE_UNAVAILABLE`.
+---
 
-Current limitation:
+## Features
 
-- MongoDB persistence schemas (`InventoryItems`, `Reservations`) and Redis distributed lock infrastructure are initialized, but reservation expiry worker, release idempotency, reservation availability checks, and most gRPC business logic are not complete yet.
+### Core Implemented Features
+- **Multi-SKU & Multi-Warehouse Aggregated Stock Retrieval (`GetStock`)**: Allows querying stock for a specific SKU at a particular warehouse, or aggregates inventory across all warehouses if the warehouse ID is omitted.
+- **Atomic Batch Reservation (`ReserveBatch`)**: All-or-nothing batch reservation engine protected by distributed locks.
+- **Idempotent Reservation Release (`ReleaseBatch`)**: Frees reserved inventory back to available stock. Validates against the database-stored reservation state rather than user input to guarantee idempotency.
+- **Idempotent Reservation Confirmation (`ConfirmReservation`)**: Converts a pending reservation to a permanent sale. Deducts the reserved count without affecting available stock.
+- **Deterministic Concurrency Control**: Prevents deadlocks under concurrent requests by sorting Redis lock keys lexicographically. Utilizes Polly retry policies for lock acquisition contention.
+- **Transactional Audit Trail**: Every stock movement (`Reserve`, `Release`, `Confirm`, etc.) is recorded as an immutable log in the `InventoryTransactions` collection within the same MongoDB transaction.
+- **Structured Serilog Logging**: Technical logging with named property templates (no string interpolation) written to both the Console and a dedicated MongoDB `ApplicationLogs` collection.
+- **OpenTelemetry & Health Infrastructure**: Integration with .NET Aspire ServiceDefaults, exposing `/health` (liveness) and `/health/ready` (readiness) endpoints mapped to Mongo and Redis states.
 
-## Tech stack
+### Planned Features (Roadmap)
+- **Automatic Expiration Engine**: A background worker that periodically scans for expired `Pending` reservations (10-minute TTL) and releases them, utilizing a MongoDB checkpoint system to resume safely after crashes.
+- **Order persistence & lifecycle in `OrderService`**: Currently, `OrderService` serves as a router. The database schema, order history, and full lifecycle are slated for implementation.
+- **Redis-Based Idempotency Layer**: Adding `Idempotency-Key` checking on the REST endpoints to prevent duplicate order submissions.
+- **Polly gRPC Resilience**: Implementing retry, timeout, and circuit breaker policies on the gRPC client side.
+- **Advanced Inventory Workflows**: Multi-warehouse fallback, automated warehouse rebalancing, low-stock alerts, and snapshot/restore utilities.
 
-- .NET 10
-- ASP.NET Core Minimal APIs
-- gRPC / Protobuf
-- .NET Aspire AppHost and ServiceDefaults
-- OpenTelemetry packages via ServiceDefaults
-- Microsoft HTTP resilience defaults via ServiceDefaults
-- Polly for Redis lock acquisition retry and future resilience policies
-- Serilog for structured technical logging
-- Scalar for API reference in `OrderService.API`
-- Docker Compose
-- MongoDB 8.2.11 configured to start as a single-node replica set
-- Redis 8.8.0 Alpine
-- RedisInsight 3.6.0
+---
 
-## Repository structure
+## Tech Stack
+
+- **Framework**: [.NET 10](https://dotnet.microsoft.com/download/dotnet/10.0) (C# Web API & gRPC)
+- **Database**: [MongoDB 8.2](https://www.mongodb.com/) (Configured as a single-node replica set to support multi-document transactions)
+- **Caching & Locking**: [Redis 8.8](https://redis.io/) (For high-speed distributed locking via `StackExchange.Redis`)
+- **Observability Collectors**: [Grafana Alloy 1.17](https://grafana.com/docs/alloy/latest/)
+- **Metrics, Logs & Traces**: [Prometheus 3.7](https://prometheus.io/), [Grafana Loki 3.7](https://grafana.com/oss/loki/), [Grafana Tempo](https://grafana.com/oss/tempo/)
+- **Observability UI**: [Grafana 13.0](https://grafana.com/) & [RedisInsight 3.6](https://redis.com/redis-enterprise/redisinsight/)
+- **Resilience**: [Polly](https://github.com/App-vNext/Polly) (Used for Redis lock acquisition retries)
+- **Logging**: [Serilog](https://serilog.net/) (Structured logging to Console and MongoDB)
+- **API Documentation**: [Scalar](https://github.com/scalar/scalar) (REST API Reference playground)
+
+---
+
+## Project Structure
 
 ```text
 InventoryReservationSystem/
-├── AGENTS.md
-├── CLAUDE.md
-├── README.md
-├── docker-compose.yml
-├── InventoryReservationSystem.slnx
-├── InventoryReservationSystem.AppHost/
-│   ├── AppHost.cs
-│   └── InventoryReservationSystem.AppHost.csproj
-├── InventoryReservationSystem.ServiceDefaults/
-│   ├── Extensions.cs
-│   └── InventoryReservationSystem.ServiceDefaults.csproj
-├── Docs/
-│   ├── about-project/
-│   │   └── requirements.md
-│   └── NewProjectTechnologyReport/
+├── InventoryReservationSystem.AppHost/          # .NET Aspire App Host for local orchestration
+├── InventoryReservationSystem.ServiceDefaults/  # Shared OpenTelemetry, Health Check & Resilience settings
+├── Docs/                                        # Architecture analysis, requirements, and roadmaps
 ├── src/
 │   ├── contracts/
-│   │   └── InventoryReservationSystem.Contracts/
-│   │       ├── InventoryReservationSystem.Contracts.csproj
-│   │       └── Protos/
-│   │           └── inventory.proto
+│   │   └── InventoryReservationSystem.Contracts/ # Generated gRPC C# clients and Protobuf contract definitions
 │   └── services/
 │       ├── InventoryService/
-│       │   ├── InventoryService.API/
-│       │   │   ├── Grpc/
-│       │   │   │   └── InventoryGrpcService.cs
-│       │   │   ├── Program.cs
-│       │   │   └── InventoryService.API.csproj
-│       │   ├── InventoryService.Application/
-│       │   ├── InventoryService.Domain/
-│       │   └── InventoryService.Infrastructure/
+│       │   ├── InventoryService.API/            # Grpc endpoint layer, Serilog config & program bootstrap
+│       │   ├── InventoryService.Application/    # Commands/Queries handlers (Reserve, Release, Confirm)
+│       │   ├── InventoryService.Domain/         # Business entities, exceptions, and repository interfaces
+│       │   └── InventoryService.Infrastructure/  # Mongo repositories, Redis Distributed Lock, Mongo transactions
 │       └── OrderService/
-│           ├── OrderService.API/
-│           │   ├── Endpoints/
-│           │   │   └── OrderEndpoints.cs
-│           │   ├── Program.cs
-│           │   └── OrderService.API.csproj
-│           ├── OrderService.Application/
-│           ├── OrderService.Domain/
-│           └── OrderService.Infrastructure/
-└── test/
+│           ├── OrderService.API/                # REST endpoints (/api/orders) and client registrations
+│           ├── OrderService.Application/        # Order lifecycle use cases (planned)
+│           ├── OrderService.Domain/             # Order and OrderHistory aggregates (planned)
+│           └── OrderService.Infrastructure/     # HttpClient configurations (planned)
+├── test/                                        # Empty (Integration, Unit, and Concurrency tests planned)
+├── docker-compose.yml                           # Starts services, databases, replica sets, and telemetry
+└── InventoryReservationSystem.slnx              # Modern .NET solution file structure
 ```
 
-## Local run instructions
+---
+
+## Environment Variables
+
+The default configurations are located in the `appsettings.json` files and are overridden in docker environments using environment variables:
+
+| Variable Name | Service | Default Value | Description |
+|---|---|---|---|
+| `ASPNETCORE_ENVIRONMENT` | All | `Production` | App run profile (`Development` or `Production`) |
+| `ASPNETCORE_URLS` | OrderService | `http://+:8080` | Internal HTTP listening port |
+| `InventoryService__Address` | OrderService | `http://inventoryservice-api:8081` | gRPC address of the Inventory service |
+| `ConnectionStrings__MongoDb` | OrderService | `mongodb://mongodb:27017/order-service?replicaSet=rs0` | MongoDB Connection String (with ReplicaSet configured) |
+| `ConnectionStrings__Redis` | OrderService | `redis:6379` | Redis Host address |
+| `ConnectionStrings__MongoDb` | InventoryService | `mongodb://mongodb:27017/inventory-service?replicaSet=rs0` | MongoDB Connection String for inventory |
+| `RedisOptions__ConnectionString` | InventoryService | `redis:6379` | Redis lock service connection address |
+
+---
+
+## Getting Started
 
 ### Prerequisites
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) or any compatible container runtime
 
-- .NET 10 SDK
-- Docker Desktop or compatible Docker runtime
+### Installation
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/abdulkadirozyurt/InventoryReservationSystem.git
+   cd InventoryReservationSystem
+   ```
 
-### Run with Docker Compose
+### Running the Application
+
+#### Option A: Docker Compose (Recommended)
+This runs the entire stack, including both APIs, databases, telemetry collectors, and visualization panels.
 
 ```bash
 docker compose up --build
 ```
 
-Docker Compose runs services with `ASPNETCORE_ENVIRONMENT=Production` and uses the base `appsettings.json` files.
+**Exposed Ports & Interfaces:**
+- **Order Service (REST)**: [http://localhost:5041](http://localhost:5041)
+- **Scalar API Reference**: [http://localhost:5041/scalar/v1](http://localhost:5041/scalar/v1)
+- **Inventory Service (HTTP Health)**: [http://localhost:5032](http://localhost:5032)
+- **Inventory Service (gRPC)**: `localhost:5081`
+- **RedisInsight**: [http://localhost:5540](http://localhost:5540)
+- **Grafana**: [http://localhost:3000](http://localhost:3000) (Default credentials: `admin` / `admin`)
+- **Prometheus**: [http://localhost:9090](http://localhost:9090)
+- **MongoDB**: `localhost:27017`
 
-Published ports from `docker-compose.yml`:
-
-- OrderService API: `http://localhost:5041`
-- InventoryService HTTP health/OpenAPI endpoint: `http://localhost:5032`
-- InventoryService gRPC endpoint: `http://localhost:5081`
-- MongoDB: `localhost:27017`
-- Redis: `localhost:6379`
-- RedisInsight: `http://localhost:5540`
-
-Example order request:
-
-```bash
-curl -X POST http://localhost:5041/api/orders \
-  -H "Content-Type: application/json" \
-  -d '{"items":[{"sku":"SKU-001","quantity":1}]}'
-```
-
-Expected current behavior: response is based on stubbed InventoryService gRPC success, not real stock reservation.
-
-### Run with .NET Aspire AppHost
+#### Option B: .NET Aspire AppHost (API Orchestration)
+If you prefer running only the API services locally and referencing existing external Mongo/Redis instances, use Aspire:
 
 ```bash
 dotnet run --project InventoryReservationSystem.AppHost/InventoryReservationSystem.AppHost.csproj
 ```
+*Note: The AppHost launches the Aspire Dashboard and starts both C# APIs, but it does not spin up MongoDB or Redis resources; they must be running externally.*
 
-Current AppHost starts the two API projects and wires `OrderService` to wait for/reference `InventoryService`. It does not currently define MongoDB or Redis resources.
+#### Option C: Directly Running Services via CLI
+Start the services individually. Ensure your local Redis and MongoDB (Replica Set mode) are running and their connection addresses are updated in `appsettings.json`.
 
-### Run services directly
-
-InventoryService:
-
+**Inventory Service:**
 ```bash
 dotnet run --project src/services/InventoryService/InventoryService.API/InventoryService.API.csproj
 ```
 
-OrderService:
-
+**Order Service:**
 ```bash
 dotnet run --project src/services/OrderService/OrderService.API/OrderService.API.csproj
 ```
 
-When running `OrderService.API` outside Docker/AppHost, ensure `InventoryService:Address` points to the running InventoryService endpoint.
+---
 
-## Roadmap / current focus
+## Usage
 
-Phase 1 infrastructure, protocols, and observability setup is complete. Phase 2 InventoryService MongoDB data model, audit collection setup, and Redis distributed lock infrastructure are complete.
+### REST API (OrderService)
 
-Health checks:
+#### Create Order Batch Reservation
+Submit a batch of items to reserve inventory.
 
-- `/health` reports liveness.
-- `/health/ready` reports readiness with dependency-level JSON details.
-- InventoryService readiness checks MongoDB and Redis.
-- OrderService readiness checks MongoDB, Redis, and InventoryService reachability.
+- **Endpoint**: `POST /api/orders`
+- **Headers**:
+  - `Content-Type: application/json`
+  - `X-Correlation-ID: <unique-guid>` (Optional)
+- **Request Body**:
+  ```json
+  {
+    "items": [
+      {
+        "sku": "SKU-001",
+        "warehouseId": "WH-001",
+        "quantity": 5
+      },
+      {
+        "sku": "SKU-002",
+        "warehouseId": "WH-001",
+        "quantity": 2
+      }
+    ]
+  }
+  ```
 
-Later phases:
+- **Example curl**:
+  ```bash
+  curl -X POST http://localhost:5041/api/orders \
+    -H "Content-Type: application/json" \
+    -d '{"items":[{"sku":"SKU-001","warehouseId":"WH-001","quantity":5},{"sku":"SKU-002","warehouseId":"WH-001","quantity":2}]}'
+  ```
 
-- Real InventoryService reservation logic.
-- OrderService order lifecycle and resilient gRPC integration.
-- Reservation expiry and operational workflows.
-- Dashboards, validation, stress tests, and stability checks.
+- **Example Response**:
+  ```json
+  {
+    "success": true,
+    "reservationId": "01908d1a49ab7284b802613d96924bfe",
+    "failures": []
+  }
+  ```
 
-## Continuous maintenance
+---
 
-README.md is the public project entry point. Keep it continuously up to date after architecture, dependency, setup, endpoint, workflow, or status changes. Do not mark planned or stubbed behavior as complete.
+### gRPC Contract (InventoryService)
+
+The gRPC API contract is split into five distinct Protobuf files under [src/contracts/InventoryReservationSystem.Contracts/Protos](file:///src/contracts/InventoryReservationSystem.Contracts/Protos/):
+
+1. **`inventory.proto`**: Declares the primary `InventoryReservations` service definition and RPC signatures.
+2. **`inventory_common.proto`**: Houses shared models such as `RequestMetadata` (carrying Correlation IDs and Trace headers) and `ReservationFailure` detail structures.
+3. **`inventory_reservations.proto`**: Request and response objects for `ReserveBatch`, `ReleaseBatch`, and `ConfirmReservation`.
+4. **`inventory_stock.proto`**: Request and response objects for stock lookups (`GetStock`), and stock adjustments (`IncreaseStock`/`DecreaseStock`).
+5. **`inventory_operations.proto`**: Placeholders for future operations, including `RebalanceWarehouse` and `CreateInventorySnapshot`.
+
+---
+
+## Tests
+
+The `test/` directory is currently **empty**. 
+Comprehensive automated testing is planned for **Phase 6** of the roadmap and will include:
+- **Concurrency Integration Tests**: Simulating 100 concurrent requests targeting intersecting SKUs to verify no deadlocks occur and stock allocations remain consistent.
+- **Idempotency Verification**: Validating that repeating an idempotency key multiple times returns the same result without duplicate database mutations.
+- **Rollback Tests**: Simulating failures mid-transaction to verify MongoDB replica-set rollbacks.
+- **Stress Testing**: Using `k6` load scripts to measure system limits, lock contention metrics, and trace performance bottlenecks in Grafana.
+
+---
+
+## What I Learned
+
+During the development of this prototype, several key distributed architecture insights were gained:
+
+1. **Deadlock Prevention in Distributed Locks**: When locking multiple resources (e.g., reserving SKU-A and SKU-B in a single request), acquiring locks in random order will inevitably lead to deadlocks under high concurrency. Sorting the lock keys lexicographically (e.g., `Distinct().Order()`) before making Redis calls ensures a consistent lock acquisition hierarchy, avoiding deadlock situations.
+2. **MongoDB Replica Set Requirements**: MongoDB transactions (`IClientSessionHandle`) cannot be executed on standalone instances. They require a Replica Set deployment. A single-node Replica Set (`rs0`) was configured in Docker Compose to enable transactions locally without multi-node overhead.
+3. **Idempotent State Management**: Relying on client request inputs for release operations is error-prone. The safest way to release or confirm a reservation is to load the reservation document state directly from MongoDB under a lock, execute the state transition on the server, and verify that the status has not already been changed (e.g., preventing double-refund/double-release).
+4. **Alloy Telemetry Collection**: Setting up Grafana Alloy as a local agent provides a clean way to collect traces, logs, and metrics at the host level, separating the application code from direct collection storage logic.
+
+---
+
+## Known Limitations
+
+- **No Order Storage**: `OrderService` does not have a database and does not persist orders. It functions purely as a gRPC client gateway.
+- **No Automatic Cleanup**: The background worker that expires `Pending` reservations after 10 minutes is defined in the roadmap but has not yet been built. Currently, reservations do not expire automatically.
+- **Placeholder Methods**: The gRPC operations for adjusting stock (`IncreaseStock`, `DecreaseStock`), rebalancing warehouses, and creating/restoring snapshots are currently stubs that return successful response placeholders.
+- **No Tests**: Automated tests are missing and will be introduced in the final roadmap phases.
+
+---
+
+## Contributing
+
+This is a personal learning project and is not actively open for major collaborative features. However, feedback and discussions on architectural improvements are always welcome!
+
+To suggest a change:
+1. Fork the repository.
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`).
+3. Commit your changes using conventional commits.
+4. Run standard local builds and verify they compile.
+5. Open a Pull Request.
+
+---
+
+## License
+
+Distributed under the MIT License. See [LICENCE](./LICENCE) for details.
+
+---
+
+## Contact
+
+**Abdulkadir Özyurt**
+- GitHub: [@abdulkadirozyurt](https://github.com/abdulkadirozyurt)
+- Project Repository: [InventoryReservationSystem](https://github.com/abdulkadirozyurt/InventoryReservationSystem)

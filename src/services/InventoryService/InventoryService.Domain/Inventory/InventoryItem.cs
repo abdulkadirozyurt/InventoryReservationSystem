@@ -92,5 +92,25 @@ public sealed class InventoryItem
         QuantityReserved -= quantity;
         UpdatedAt = DateTime.UtcNow;
     }
+
+    public void IncreaseStock(int quantity)
+    {
+        if (quantity <= 0)
+            throw new ArgumentException("Quantity to increase must be greater than zero.", nameof(quantity));
+
+        QuantityAvailable += quantity;
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    public void DecreaseStock(int quantity)
+    {
+        if (quantity <= 0)
+            throw new ArgumentException("Quantity to decrease must be greater than zero.", nameof(quantity));
+        if (QuantityAvailable - quantity < 0)
+            throw new InvalidOperationException("Quantity available cannot be negative.");
+
+        QuantityAvailable -= quantity;
+        UpdatedAt = DateTime.UtcNow;
+    }
 }
 
