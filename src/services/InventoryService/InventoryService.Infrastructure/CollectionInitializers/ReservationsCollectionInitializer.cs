@@ -22,6 +22,7 @@ public sealed class ReservationsCollectionInitializer(IMongoDatabase database, I
 
     private async Task CreateCollectionAsync(string collectionName, CancellationToken cancellationToken)
     {
+        /*
         var command = new BsonDocument
         {
             { "create", collectionName },
@@ -31,10 +32,13 @@ public sealed class ReservationsCollectionInitializer(IMongoDatabase database, I
         };
 
         await database.RunCommandAsync<BsonDocument>(command, cancellationToken: cancellationToken);
+        */
+        await database.CreateCollectionAsync(collectionName, cancellationToken: cancellationToken);
     }
 
     private async Task ApplyValidationAsync(string collectionName, CancellationToken cancellationToken)
     {
+        /*
         var command = new BsonDocument
         {
             { "collMod", collectionName },
@@ -44,6 +48,8 @@ public sealed class ReservationsCollectionInitializer(IMongoDatabase database, I
         };
 
         await database.RunCommandAsync<BsonDocument>(command, cancellationToken: cancellationToken);
+        */
+        await Task.CompletedTask;
     }
 
     private static BsonDocument BuildValidator()

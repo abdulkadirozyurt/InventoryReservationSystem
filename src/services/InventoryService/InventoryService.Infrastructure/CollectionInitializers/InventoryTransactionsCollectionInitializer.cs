@@ -1,4 +1,4 @@
-﻿using InventoryService.Domain.InventoryTransactions;
+using InventoryService.Domain.InventoryTransactions;
 using InventoryService.Infrastructure.Mongo;
 using Microsoft.Extensions.Options;
 using MongoDB.Bson;
@@ -26,6 +26,7 @@ public sealed class InventoryTransactionsCollectionInitializer(IMongoDatabase da
 
     private async Task CreateCollectionAsync(string collectionName, CancellationToken cancellationToken)
     {
+        /*
         var command = new BsonDocument
         {
             { "create", collectionName },
@@ -35,10 +36,13 @@ public sealed class InventoryTransactionsCollectionInitializer(IMongoDatabase da
         };
 
         await database.RunCommandAsync<BsonDocument>(command, cancellationToken: cancellationToken);
+        */
+        await database.CreateCollectionAsync(collectionName, cancellationToken: cancellationToken);
     }
 
     private async Task ApplyValidationAsync(string collectionName, CancellationToken cancellationToken)
     {
+        /*
         var command = new BsonDocument
         {
             { "collMod", collectionName },
@@ -48,6 +52,8 @@ public sealed class InventoryTransactionsCollectionInitializer(IMongoDatabase da
         };
 
         await database.RunCommandAsync<BsonDocument>(command, cancellationToken: cancellationToken);
+        */
+        await Task.CompletedTask;
     }
 
     private async Task CreateIndexesAsync(CancellationToken cancellationToken)
