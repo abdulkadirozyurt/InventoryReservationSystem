@@ -2,6 +2,7 @@ using InventoryService.Application.Inventory.Abstractions;
 using InventoryService.Application.Inventory.Exceptions;
 using InventoryService.Application.Reservations.Abstractions;
 using InventoryService.Application.Reservations.Results.Release;
+using InventoryService.Domain.InventoryTransactions;
 using InventoryService.Domain.Reservations;
 using Microsoft.Extensions.Logging;
 
@@ -187,10 +188,27 @@ public sealed class ReleaseBatchCommandHandler(
                     inventoryItem.Release(releaseItem.Quantity);
 
                     await inventoryItemRepository.UpdateAsync(inventoryItem, transactionCancellationToken);
+
+                    // Release işlemi için inventory transaction kaydı oluşturulur; stok hareketi trace edilebilir olur.
+                    var transaction = new InventoryTransaction(
+                        releaseItem.Sku,
+                        releaseItem.WarehouseId,
+                        InventoryTransactionType.Release,
+                        releaseItem.Quantity,
+                        -releaseItem.Quantity,
+                        command.CorrelationId,
+                        currentReservation.ReservationId,
+                        currentReservation.OrderId,
+                        null);
+
+                    await inventoryTransactionRepository.AddAsync(transaction, transactionCancellationToken);
                 }
 
-                // Sonraki adımda buraya audit transaction ve reservation status update eklenecek.
-                transactionResult = new ReleaseBatchResult(false, SystemError, "Release batch mutation is not implemented yet.");
+                currentReservation.Release();
+                await reservationRepository.UpdateAsync(currentReservation, transactionCancellationToken);
+
+                // Stok, audit ve reservation status aynı transaction içinde başarıyla tamamlandı.
+                transactionResult = new ReleaseBatchResult(true, null, null);
             }, cancellationToken);
 
             // Defensive fallback: callback hiç sonuç yazmazsa belirsiz başarı dönmeyelim.
