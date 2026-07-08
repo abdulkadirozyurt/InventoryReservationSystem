@@ -2,7 +2,7 @@
 
 Inventory Reservation System is an early-stage .NET microservice prototype for reserving stock for orders.
 
-Goal: keep order management and inventory reservation separate, then connect them through gRPC. MongoDB collection schemas, technical logging, Redis distributed lock infrastructure, stock lookup, real ReserveBatch reservation behavior, and idempotent ReleaseBatch stock restoration are in place. Confirm, expiry, and operational reservation workflows are still in progress.
+Goal: keep order management and inventory reservation separate, then connect them through gRPC. MongoDB collection schemas, technical logging, Redis distributed lock infrastructure, stock lookup, real ReserveBatch reservation behavior, idempotent ReleaseBatch stock restoration, and idempotent ConfirmReservation support are in place. Expiry and operational reservation workflows are still in progress.
 
 ## Current status
 
@@ -10,7 +10,7 @@ Goal: keep order management and inventory reservation separate, then connect the
 - Two API services exist: `OrderService.API` and `InventoryService.API`.
 - Shared gRPC contract project exists and generates C# stubs from physically split proto files under `src/contracts/InventoryReservationSystem.Contracts/Protos`.
 - `OrderService.API` exposes a minimal order creation endpoint and calls `InventoryService.API` over gRPC.
-- `InventoryService.API` exposes a gRPC service; `GetStock(sku, warehouseId?)`, `ReserveBatch(items[])`, and `ReleaseBatch(reservationId, items[])` are wired to Application and MongoDB. Confirm and operational methods still use placeholder responses.
+- `InventoryService.API` exposes a gRPC service; `GetStock(sku, warehouseId?)`, `ReserveBatch(items[])`, `ReleaseBatch(reservationId, items[])`, and `ConfirmReservation(reservationId)` are wired to Application and MongoDB. Operational methods still use placeholder responses.
 - InventoryService initializes MongoDB schemas for `InventoryItems`, `Reservations`, and `InventoryTransactions` with validation rules and indexes.
 - InventoryService has Redis distributed lock infrastructure with deterministic lock ordering, Polly retry, lock TTL, safe token-based release, and structured Serilog lock logs.
 - InventoryService writes technical logs through Serilog to console and MongoDB `ApplicationLogs`.
@@ -18,7 +18,7 @@ Goal: keep order management and inventory reservation separate, then connect the
 - Docker Compose exists for both APIs, MongoDB replica-set startup, Redis, and RedisInsight.
 - ServiceDefaults provides shared OpenTelemetry configuration, gRPC client instrumentation, service discovery, HTTP resilience defaults, CorrelationId middleware, and development-only `/health` and `/alive` endpoints.
 - Tests are not present yet.
-- Prometheus, Loki, Tempo, Grafana, reservation expiry, release/confirm flows, and stress validation are still roadmap items.
+- Prometheus, Loki, Tempo, Grafana, reservation expiry, operational inventory flows, and stress validation are still roadmap items.
 
 ## Architecture
 
@@ -67,7 +67,7 @@ Current responsibility:
 - Initialize MongoDB collections for inventory items, reservations, and inventory transaction history.
 - Write technical application logs through Serilog.
 - Provide Redis distributed lock infrastructure for future reservation flows.
-- Return placeholder success responses for reservation operations.
+- Run real `GetStock`, `ReserveBatch`, `ReleaseBatch`, and `ConfirmReservation` inventory flows through Application handlers.
 
 Current gRPC methods:
 

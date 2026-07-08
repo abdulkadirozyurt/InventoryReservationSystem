@@ -180,7 +180,7 @@ Update this file when a service boundary, communication pattern, or structural c
   - Başarılı release/expiry işlemlerinde `InventoryTransactions` koleksiyonuna `Release` audit kaydı yazılacak.
   - Duplicate/idempotent release denemeleri, release edilmeyen rezervasyonlar, lock timeout ve transient hatalar correlation id ile loglanacak.
   - **İdempotent Kontrol:** Aynı rezervasyonun ikinci kez release edilmesi Redis ve/veya `Reservations.status` üzerinden kontrol edilerek engellenecek.
-- [ ] **Adım 3.4: ConfirmReservation(reservationId) Metodunun Yazılması**
+- [x] **Adım 3.4: ConfirmReservation(reservationId) Metodunun Yazılması**
   - `reservationId` ile dahili `Reservations` kaydı bulunacak ve durumun `Pending` olduğu doğrulanacak.
   - Rezervasyon içindeki SKU+depo anahtarları deterministik sırayla lock edilecek.
   - Confirm işleminde yalnızca `quantityReserved` azaltılacak; `quantityAvailable` geri artırılmayacak.

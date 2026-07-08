@@ -1,6 +1,7 @@
 using Grpc.Core;
 using InventoryReservationSystem.Contracts.Inventory;
 using InventoryService.Application.Inventory.Queries;
+using InventoryService.Application.Reservations.Commands.ConfirmReservation;
 using InventoryService.Application.Reservations.Commands.ReleaseBatch;
 using InventoryService.Application.Reservations.Commands.ReserveBatch;
 
@@ -9,7 +10,8 @@ namespace InventoryService.API.Grpc;
 public sealed class InventoryGrpcService(
     GetStockQueryHandler getStockQueryHandler,
     ReserveBatchCommandHandler reserveBatchCommandHandler,
-    ReleaseBatchCommandHandler releaseBatchCommandHandler) : InventoryReservations.InventoryReservationsBase
+    ReleaseBatchCommandHandler releaseBatchCommandHandler,
+    ConfirmReservationCommandHandler confirmReservationCommandHandler) : InventoryReservations.InventoryReservationsBase
 {
     public override async Task<ReserveBatchResponse> ReserveBatch(ReserveBatchRequest request, ServerCallContext context)
     {
@@ -42,15 +44,25 @@ public sealed class InventoryGrpcService(
         return response;
     }
 
-    public override Task<ConfirmReservationResponse> ConfirmReservation(ConfirmReservationRequest request, ServerCallContext context)
-    {
+    public override async Task<ConfirmReservationResponse> ConfirmReservation(ConfirmReservationRequest request, ServerCallContext context)
+    {        
+        var command = new ConfirmReservationCommand(
+            request.ReservationId,
+            request.Metadata?.CorrelationId ?? string.Empty);
+
+        // Asıl iş handler içinde: idempotency, lock, transaction ve audit.
+        var result = await confirmReservationCommandHandler.HandleAsync(command, context.CancellationToken);
+
+        // Handler sonucunu proto response modeline çeviriyoruz.
         var response = new ConfirmReservationResponse
         {
-            Success = true,
-            Metadata = CreateMetadata(request.Metadata)
+            Metadata = CreateMetadata(request.Metadata),
+            Success = result.Success,
+            ErrorCode = result.ErrorCode ?? string.Empty,
+            ErrorMessage = result.ErrorMessage ?? string.Empty
         };
 
-        return Task.FromResult(response);
+        return response;
     }
 
     public override async Task<ReleaseBatchResponse> ReleaseBatch(ReleaseBatchRequest request, ServerCallContext context)
