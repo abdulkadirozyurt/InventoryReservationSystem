@@ -1,5 +1,5 @@
 using InventoryService.Application.Inventory.Queries;
-using InventoryService.Application.Reservations.Commands.Reserve;
+using InventoryService.Application.Reservations.Commands.ReserveBatch;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace InventoryService.Application;

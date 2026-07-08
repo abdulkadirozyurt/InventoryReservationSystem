@@ -1,4 +1,4 @@
-﻿namespace InventoryService.Application.Reservations.Commands.Reserve;
+﻿namespace InventoryService.Application.Reservations.Commands.ReserveBatch;
 
 public sealed record ReserveBatchCommand(
     string OrderId,

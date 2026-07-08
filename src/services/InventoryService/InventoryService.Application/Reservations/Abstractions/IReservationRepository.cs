@@ -18,7 +18,7 @@ public interface IReservationRepository
     /// <param name="reservationId">The reservation identifier to query.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The matching reservation, or null when no reservation exists.</returns>
-    Task<Reservation?> GetByIdAsync(string reservationId, CancellationToken cancellationToken = default);
+    Task<Reservation?> GetByReservationIdAsync(string reservationId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Persists changes made to an existing reservation.

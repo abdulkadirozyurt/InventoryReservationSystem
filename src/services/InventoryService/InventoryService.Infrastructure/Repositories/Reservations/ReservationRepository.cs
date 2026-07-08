@@ -41,7 +41,7 @@ public sealed class ReservationRepository(
         }
     }
 
-    public async Task<Reservation?> GetByIdAsync(string reservationId, CancellationToken cancellationToken = default)
+    public async Task<Reservation?> GetByReservationIdAsync(string reservationId, CancellationToken cancellationToken = default)
     {
         try
         {

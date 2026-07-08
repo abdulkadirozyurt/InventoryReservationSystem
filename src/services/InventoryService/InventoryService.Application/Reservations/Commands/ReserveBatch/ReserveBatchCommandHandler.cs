@@ -7,7 +7,7 @@ using InventoryService.Domain.InventoryTransactions;
 using InventoryService.Domain.Reservations;
 using Microsoft.Extensions.Logging;
 
-namespace InventoryService.Application.Reservations.Commands.Reserve;
+namespace InventoryService.Application.Reservations.Commands.ReserveBatch;
 
 public sealed class ReserveBatchCommandHandler(
     IInventoryItemRepository inventoryItemRepository,
