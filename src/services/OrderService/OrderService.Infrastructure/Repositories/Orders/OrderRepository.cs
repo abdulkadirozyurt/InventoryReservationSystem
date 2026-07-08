@@ -16,6 +16,51 @@ public sealed class OrderRepository(
 {
     private readonly IMongoCollection<Order> _collection = database.GetCollection<Order>(options.Value.OrdersCollectionName);
 
+    public async Task<IReadOnlyList<Order>> ListAsync(OrderStatus? status, DateTime? from, DateTime? to, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var builder = Builders<Order>.Filter;
+            var filter = builder.Empty;
+
+            if (status.HasValue)
+            {
+                filter &= builder.Eq(order => order.Status, status.Value);
+            }
+
+            if (from.HasValue)
+            {
+                filter &= builder.Gte(order => order.CreatedAt, from.Value);
+            }
+
+            if (to.HasValue)
+            {
+                filter &= builder.Lte(order => order.CreatedAt, to.Value);
+            }
+
+            var session = mongoSessionProvider.CurrentSession;
+
+            if (session is not null)
+            {
+                return await _collection.Find(session, filter).ToListAsync(cancellationToken);
+            }
+
+            return await _collection.Find(filter).ToListAsync(cancellationToken);
+        }
+        catch (MongoException exception)
+        {
+            logger.LogError(
+            exception,
+            "MongoDB failed while listing orders. Status: {Status}, From: {From}, To: {To}, ErrorCategory: {ErrorCategory}",
+            status,
+            from,
+            to,
+            "TransientMongoError");
+
+            throw new OrderStoreUnavailableException("Order store is unavailable while listing orders", exception);
+        }
+    }
+
     public async Task AddAsync(Order order, CancellationToken cancellationToken = default)
     {
         try
@@ -89,6 +134,9 @@ public sealed class OrderRepository(
             throw new OrderStoreUnavailableException("Order store is unavailable while retrieving order by reservation", exception);
         }
     }
+
+
+
 
     public async Task UpdateAsync(Order order, CancellationToken cancellationToken = default)
     {
