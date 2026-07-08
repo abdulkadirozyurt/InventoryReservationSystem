@@ -52,11 +52,12 @@ flowchart TD
 ### Flow Breakdown
 1. **REST Request**: A client submits an order creation payload containing a batch of SKUs, warehouse IDs, and quantities to `OrderService.API` (`POST /api/orders`).
 2. **Context Propagation**: `CorrelationId` and W3C trace contexts are generated or extracted from headers and propagated downstream.
-3. **gRPC Delegation**: `OrderService.API` acts as a gateway, calling the `InventoryReservations` gRPC service implemented by `InventoryService.API`.
-4. **Deterministic Lock Acquisition**: The inventory engine extracts unique keys for each SKU+Warehouse combination, sorts them alphabetically, and acquires locks sequentially from Redis.
-5. **Atomic Consistency Check**: Under the protection of the locks, a MongoDB replica-set transaction is opened. The system validates whether all requested stocks exist and are sufficient. If a single SKU is insufficient, the transaction rolls back, all locks are released, and a batch failure is returned.
-6. **Audit and Persistence**: If all stocks are valid, stock balances are adjusted, a `Pending` reservation is recorded, audit records are written to `InventoryTransactions`, and the transaction commits.
-7. **Telemetry Tracking**: Telemetry data (logs, metrics, and distributed traces) are automatically collected and shipped via Grafana Alloy to Prometheus, Loki, and Tempo.
+3. **Application Use Case**: `OrderService.API` delegates to `OrderService.Application` command/query handlers; endpoints stay thin and do not call repositories directly.
+4. **gRPC Delegation**: `OrderService.Infrastructure` implements the inventory reservation abstraction and calls the `InventoryReservations` gRPC service implemented by `InventoryService.API`.
+5. **Deterministic Lock Acquisition**: The inventory engine extracts unique keys for each SKU+Warehouse combination, sorts them alphabetically, and acquires locks sequentially from Redis.
+6. **Atomic Consistency Check**: Under the protection of the locks, a MongoDB replica-set transaction is opened. The system validates whether all requested stocks exist and are sufficient. If a single SKU is insufficient, the transaction rolls back, all locks are released, and a batch failure is returned.
+7. **Audit and Persistence**: If all stocks are valid, stock balances are adjusted, a `Pending` reservation is recorded, audit records are written to `InventoryTransactions`, OrderService persists the order plus `OrderHistory`, and the transactions commit.
+8. **Telemetry Tracking**: Telemetry data (logs, metrics, and distributed traces) are automatically collected and shipped via Grafana Alloy to Prometheus, Loki, and Tempo.
 
 ---
 
@@ -72,10 +73,10 @@ flowchart TD
 - **Transactional Audit Trail**: Every stock movement (`Reserve`, `Release`, `Confirm`, etc.) is recorded as an immutable log in the `InventoryTransactions` collection within the same MongoDB transaction.
 - **Structured Serilog Logging**: Technical logging with named property templates (no string interpolation) written to both the Console and a dedicated MongoDB `ApplicationLogs` collection.
 - **OpenTelemetry Metrics & Health Infrastructure**: Integration with .NET Aspire ServiceDefaults, exposing `/health` (liveness) and `/health/ready` (readiness) endpoints mapped to Mongo and Redis states. InventoryService emits low-cardinality metrics for Redis lock acquisition/ownership, TTL exceeded detection, reservation operation duration/failures, time-to-reserve, time-to-confirmation, and operational stock adjustments.
+- **Order Persistence & Lifecycle Endpoints**: OrderService persists created orders and `OrderHistory`, lists/reads orders from MongoDB, and confirms/cancels orders by calling InventoryService through Application-layer use cases.
 
 ### Planned Features (Roadmap)
 - **Automatic Expiration Engine**: A background worker that periodically scans for expired `Pending` reservations (10-minute TTL) and releases them, utilizing a MongoDB checkpoint system to resume safely after crashes.
-- **Order persistence & lifecycle in `OrderService`**: Currently, `OrderService` serves as a router. The database schema, order history, and full lifecycle are slated for implementation.
 - **Redis-Based Idempotency Layer**: Adding `Idempotency-Key` checking on the REST endpoints to prevent duplicate order submissions.
 - **Polly gRPC Resilience**: Implementing retry, timeout, and circuit breaker policies on the gRPC client side.
 - **Advanced Inventory Workflows**: Multi-warehouse fallback, automated warehouse rebalancing, low-stock alerts, and snapshot/restore utilities.
@@ -113,10 +114,10 @@ InventoryReservationSystem/
 │       │   ├── InventoryService.Domain/         # Business entities, exceptions, and repository interfaces
 │       │   └── InventoryService.Infrastructure/  # Mongo repositories, Redis Distributed Lock, Mongo transactions
 │       └── OrderService/
-│           ├── OrderService.API/                # REST endpoints (/api/orders) and client registrations
-│           ├── OrderService.Application/        # Order lifecycle use cases (planned)
-│           ├── OrderService.Domain/             # Order and OrderHistory aggregates (planned)
-│           └── OrderService.Infrastructure/     # HttpClient configurations (planned)
+│           ├── OrderService.API/                # Thin REST endpoints (/api/orders)
+│           ├── OrderService.Application/        # Order lifecycle commands/queries and inventory abstraction
+│           ├── OrderService.Domain/             # Order and OrderHistory aggregates
+│           └── OrderService.Infrastructure/     # Mongo repositories, transactions, health checks, gRPC adapter
 ├── test/                                        # Empty (Integration, Unit, and Concurrency tests planned)
 ├── docker-compose.yml                           # Starts services, databases, replica sets, and telemetry
 └── InventoryReservationSystem.slnx              # Modern .NET solution file structure
@@ -235,6 +236,7 @@ Submit a batch of items to reserve inventory.
   ```json
   {
     "success": true,
+    "orderNumber": "019f41d43b7176ef9d93820423e24268",
     "reservationId": "01908d1a49ab7284b802613d96924bfe",
     "failures": []
   }

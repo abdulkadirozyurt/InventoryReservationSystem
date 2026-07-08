@@ -1,5 +1,10 @@
-using InventoryReservationSystem.Contracts.Inventory;
-using OrderService.Application.Orders.Abstractions;
+using OrderService.Application.Orders.Commands.BulkCancelOrders;
+using OrderService.Application.Orders.Commands.CancelOrder;
+using OrderService.Application.Orders.Commands.ConfirmOrder;
+using OrderService.Application.Orders.Commands.CreateOrder;
+using OrderService.Application.Orders.Queries.GetOrder;
+using OrderService.Application.Orders.Queries.ListOrders;
+using OrderService.Application.Orders.Results;
 using OrderService.Domain.Orders;
 
 namespace OrderService.API.Endpoints;
@@ -33,193 +38,116 @@ public static class OrderEndpoints
 
     private static async Task<IResult> CreateOrderAsync(
         CreateOrderRequest request,
-        InventoryReservations.InventoryReservationsClient inventoryClient,
-        IOrderRepository orderRepository,
-        IOrderHistoryRepository orderHistoryRepository,
-        IOrderUnitOfWork unitOfWork,
+        CreateOrderCommandHandler handler,
         HttpContext context,
         CancellationToken cancellationToken)
     {
-        var correlationId = context.Items[Extensions.CorrelationIdItemName]?.ToString()
-                    ?? Guid.CreateVersion7().ToString("N");
+        var command = new CreateOrderCommand(
+            request.Items.Select(item => new CreateOrderItemCommand(item.Sku, item.WarehouseId, item.Quantity)).ToArray(),
+            GetCorrelationId(context));
 
-        var orderNumber = Guid.CreateVersion7().ToString("N");
-
-        var reserveRequest = new ReserveBatchRequest
-        {
-            Metadata = new RequestMetadata
-            {
-                CorrelationId = correlationId
-            },
-            OrderId = orderNumber
-        };
-
-        reserveRequest.Items.AddRange(request.Items.Select(item => new ReservationItem
-        {
-            Sku = item.Sku,
-            WarehouseId = item.WarehouseId,
-            Quantity = item.Quantity
-        }));
-
-        var reserveResponse = await inventoryClient.ReserveBatchAsync(reserveRequest, cancellationToken: cancellationToken);
-
-        if (reserveResponse.Success)
-        {
-            // order içindeki item'ları OrderLineItem domain modeline dönüştür
-            var lineItems = request.Items.Select(item =>
-            {
-                var lineItem = new OrderLineItem(item.Sku, item.WarehouseId, item.Quantity);
-                lineItem.SetReservedQuantity(item.Quantity);
-                return lineItem;
-            }).ToList();
-
-            // order ve history nesnelerini oluştur
-            var order = new Order(orderNumber, lineItems);
-
-            var history = new OrderHistory(orderNumber, null, OrderStatus.Pending, correlationId, "Order created with inventory reservation");
-
-            // transaction içinde order ve history'yi ekle
-            await unitOfWork.ExecuteInTransactionAsync(async ct =>
-            {
-                await orderRepository.AddAsync(order, ct);
-                await orderHistoryRepository.AddAsync(history, ct);
-            }, cancellationToken);
-        }
-
+        var result = await handler.HandleAsync(command, cancellationToken);
 
         return Results.Ok(new CreateOrderResponse(
-            reserveResponse.Success,
-            reserveResponse.ReservationId,
-            reserveResponse.Failures.Select(failure => new CreateOrderFailureResponse(
+            result.Success,
+            result.OrderNumber,
+            result.ReservationId ?? string.Empty,
+            result.Failures.Select(failure => new CreateOrderFailureResponse(
                 failure.Sku,
                 failure.WarehouseId,
                 failure.ErrorCode,
                 failure.Reason)).ToArray()));
     }
 
-    private static async Task<IResult> GetOrderAsync(string orderNumber, IOrderRepository orderRepository, CancellationToken cancellationToken)
+    private static async Task<IResult> GetOrderAsync(
+        string orderNumber,
+        GetOrderQueryHandler handler,
+        CancellationToken cancellationToken)
     {
-        var order = await orderRepository.GetByOrderNumberAsync(orderNumber, cancellationToken);
-        if (order is null)
-            return Results.NotFound();
-
-        return Results.Ok(MapOrder(order));
+        var order = await handler.HandleAsync(new GetOrderQuery(orderNumber), cancellationToken);
+        return order is null ? Results.NotFound() : Results.Ok(MapOrder(order));
     }
 
-
-    private static Task<IResult> CancelOrderAsync(string orderNumber)
+    private static async Task<IResult> CancelOrderAsync(
+        string orderNumber,
+        CancelOrderRequest? request,
+        CancelOrderCommandHandler handler,
+        HttpContext context,
+        CancellationToken cancellationToken)
     {
-        return Task.FromResult<IResult>(Results.Ok(new CancelOrderResponse(orderNumber, true)));
+        var result = await handler.HandleAsync(
+            new CancelOrderCommand(orderNumber, GetCorrelationId(context), request?.Reason),
+            cancellationToken);
+
+        return MapCancelOperationResult(result);
     }
 
-    private static Task<IResult> BulkCancelOrdersAsync(BulkCancelOrdersRequest request)
+    private static async Task<IResult> BulkCancelOrdersAsync(
+        BulkCancelOrdersRequest request,
+        BulkCancelOrdersCommandHandler handler,
+        HttpContext context,
+        CancellationToken cancellationToken)
     {
-        return Task.FromResult<IResult>(Results.Ok(new BulkCancelOrdersResponse(
-            request.OrderNumbers.Select(orderNumber => new CancelOrderResponse(orderNumber, true)).ToArray())));
+        var results = await handler.HandleAsync(
+            new BulkCancelOrdersCommand(request.OrderNumbers, GetCorrelationId(context), request.Reason),
+            cancellationToken);
+
+        return Results.Ok(new BulkCancelOrdersResponse(results.Select(MapCancelResponse).ToArray()));
     }
 
     private static async Task<IResult> ListOrdersAsync(
         OrderStatus? status,
         DateTime? from,
         DateTime? to,
-        IOrderRepository orderRepository,
+        ListOrdersQueryHandler handler,
         CancellationToken cancellationToken)
     {
-        var orders = await orderRepository.ListAsync(status, from, to, cancellationToken);
-
-        return Results.Ok(new ListOrdersResponse(
-            orders.Select(MapOrder).ToArray()));
+        var orders = await handler.HandleAsync(new ListOrdersQuery(status, from, to), cancellationToken);
+        return Results.Ok(new ListOrdersResponse(orders.Select(MapOrder).ToArray()));
     }
 
     private static async Task<IResult> ConfirmOrderAsync(
-    string orderNumber,
-    InventoryReservations.InventoryReservationsClient inventoryClient,
-    IOrderRepository orderRepository,
-    IOrderHistoryRepository orderHistoryRepository,
-    IOrderUnitOfWork unitOfWork,
-    HttpContext context,
-    CancellationToken cancellationToken)
+        string orderNumber,
+        ConfirmOrderCommandHandler handler,
+        HttpContext context,
+        CancellationToken cancellationToken)
     {
-        var correlationId = context.Items[Microsoft.Extensions.Hosting.Extensions.CorrelationIdItemName]?.ToString()
-            ?? Guid.CreateVersion7().ToString("N");
+        var result = await handler.HandleAsync(
+            new ConfirmOrderCommand(orderNumber, GetCorrelationId(context)),
+            cancellationToken);
 
-        var order = await orderRepository.GetByOrderNumberAsync(orderNumber, cancellationToken);
-
-        if (order is null)
-        {
-            return Results.NotFound(new ConfirmOrderResponse(
-                orderNumber,
-                false,
-                "OrderNotFound",
-                "Order was not found."));
-        }
-
-        if (order.Status != OrderStatus.Pending)
-        {
-            return Results.BadRequest(new ConfirmOrderResponse(
-                order.OrderNumber,
-                false,
-                "InvalidOrderStatus",
-                $"Order status must be Pending. Current status: {order.Status}."));
-        }
-
-        if (string.IsNullOrWhiteSpace(order.ReservationId))
-        {
-            return Results.BadRequest(new ConfirmOrderResponse(
-                order.OrderNumber,
-                false,
-                "MissingReservationId",
-                "Order does not have a reservation id."));
-        }
-
-        var confirmRequest = new ConfirmReservationRequest
-        {
-            Metadata = new RequestMetadata
-            {
-                CorrelationId = correlationId
-            },
-            ReservationId = order.ReservationId
-        };
-
-        var confirmResponse = await inventoryClient.ConfirmReservationAsync(
-            confirmRequest,
-            cancellationToken: cancellationToken);
-
-        if (!confirmResponse.Success)
-        {
-            return Results.BadRequest(new ConfirmOrderResponse(
-                order.OrderNumber,
-                false,
-                confirmResponse.ErrorCode,
-                confirmResponse.ErrorMessage));
-        }
-
-        await unitOfWork.ExecuteInTransactionAsync(async ct =>
-        {
-            var previousStatus = order.Status;
-
-            order.Confirm();
-
-            await orderRepository.UpdateAsync(order, ct);
-
-            var history = new OrderHistory(
-                order.OrderNumber,
-                previousStatus,
-                order.Status,
-                correlationId,
-                "Order confirmed.");
-
-            await orderHistoryRepository.AddAsync(history, ct);
-        }, cancellationToken);
-
-        return Results.Ok(new ConfirmOrderResponse(order.OrderNumber, true));
+        return MapOperationResult(result);
     }
 
-    private static GetOrderResponse MapOrder(Order order)
+    private static IResult MapOperationResult(OrderOperationResult result)
+    {
+        if (result.Success)
+            return Results.Ok(new ConfirmOrderResponse(result.OrderNumber, true));
+
+        var response = new ConfirmOrderResponse(result.OrderNumber, false, result.ErrorCode, result.ErrorMessage);
+
+        return result.ErrorCode == "OrderNotFound"
+            ? Results.NotFound(response)
+            : Results.BadRequest(response);
+    }
+
+    private static IResult MapCancelOperationResult(OrderOperationResult result)
+    {
+        if (result.Success)
+            return Results.Ok(MapCancelResponse(result));
+
+        var response = MapCancelResponse(result);
+
+        return result.ErrorCode == "OrderNotFound"
+            ? Results.NotFound(response)
+            : Results.BadRequest(response);
+    }
+
+    private static GetOrderResponse MapOrder(OrderResult order)
     {
         return new GetOrderResponse(
             order.OrderNumber,
-            order.Status.ToString(),
+            order.Status,
             order.ReservationId,
             order.Items.Select(item => new GetOrderItemResponse(
                 item.Sku,
@@ -229,13 +157,28 @@ public static class OrderEndpoints
             order.CreatedAt,
             order.UpdatedAt);
     }
+
+    private static CancelOrderResponse MapCancelResponse(OrderOperationResult result)
+    {
+        return new CancelOrderResponse(result.OrderNumber, result.Success, result.ErrorCode, result.ErrorMessage);
+    }
+
+    private static string GetCorrelationId(HttpContext context)
+    {
+        return context.Items[Extensions.CorrelationIdItemName]?.ToString()
+            ?? Guid.CreateVersion7().ToString("N");
+    }
 }
 
 public sealed record CreateOrderRequest(IReadOnlyList<CreateOrderItemRequest> Items);
 
 public sealed record CreateOrderItemRequest(string Sku, string WarehouseId, int Quantity);
 
-public sealed record CreateOrderResponse(bool Success, string ReservationId, IReadOnlyCollection<CreateOrderFailureResponse> Failures);
+public sealed record CreateOrderResponse(
+    bool Success,
+    string OrderNumber,
+    string ReservationId,
+    IReadOnlyCollection<CreateOrderFailureResponse> Failures);
 
 public sealed record CreateOrderFailureResponse(string Sku, string WarehouseId, string ErrorCode, string Reason);
 
@@ -253,13 +196,20 @@ public sealed record GetOrderItemResponse(
     int RequestedQuantity,
     int ReservedQuantity);
 
-public sealed record CancelOrderResponse(string OrderNumber, bool Success);
+public sealed record CancelOrderRequest(string? Reason);
 
-public sealed record BulkCancelOrdersRequest(IReadOnlyList<string> OrderNumbers);
+public sealed record CancelOrderResponse(
+    string OrderNumber,
+    bool Success,
+    string? ErrorCode = null,
+    string? ErrorMessage = null);
+
+public sealed record BulkCancelOrdersRequest(IReadOnlyList<string> OrderNumbers, string? Reason);
 
 public sealed record BulkCancelOrdersResponse(IReadOnlyCollection<CancelOrderResponse> Results);
 
 public sealed record ListOrdersResponse(IReadOnlyCollection<GetOrderResponse> Orders);
+
 public sealed record ConfirmOrderResponse(
     string OrderNumber,
     bool Success,

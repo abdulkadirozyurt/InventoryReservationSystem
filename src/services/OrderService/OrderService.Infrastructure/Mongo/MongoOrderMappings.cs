@@ -70,7 +70,8 @@ public static class MongoOrderMappings
             classMap.GetMemberMap(nameof(OrderHistory.OrderNumber)).SetElementName("orderNumber");
             classMap.GetMemberMap(nameof(OrderHistory.FromStatus))
                 .SetElementName("fromStatus")
-                .SetSerializer(new NullableSerializer<OrderStatus>(new EnumSerializer<OrderStatus>(BsonType.String)));
+                .SetSerializer(new NullableSerializer<OrderStatus>(new EnumSerializer<OrderStatus>(BsonType.String)))
+                .SetIgnoreIfNull(true);
             classMap.GetMemberMap(nameof(OrderHistory.ToStatus))
                 .SetElementName("toStatus")
                 .SetSerializer(new EnumSerializer<OrderStatus>(BsonType.String));

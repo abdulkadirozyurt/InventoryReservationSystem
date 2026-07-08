@@ -167,7 +167,7 @@ Update this file when a service boundary, communication pattern, or structural c
   - OrderService MongoDB üzerinde `orders` ve `order-history` koleksiyonları collection validation ve indexlerle oluşturuluyor.
   - Tüm durum geçişlerini (`Pending`, `Confirmed`, `Cancelled`, `Expired`) timestamp ile kaydeden `OrderHistory` audit trail modeli kuruldu.
   - Order status değişimleri için timestamp, correlation id ve değişim nedeni alanları hazırlandı; endpoint business akışında kullanılması Adım 4.2 kapsamına bırakıldı.
-- [ ] **Adım 4.2: Minimal API İskeletinin Kurulması**
+- [X] **Adım 4.2: Minimal API İskeletinin Kurulması**
   - Create Order, Get Order, Cancel Order, Bulk Cancel (Tek istekte çoklu iptal), List Orders (Status ve tarih filtresiyle) ve Order Confirmation endpoint'leri boş fonksiyonlar olarak tanımlanacak.
   - Order Confirmation endpoint'i, order `Confirmed` yapılmadan önce InventoryService üzerinde `ConfirmReservation(reservationId)` çağıracak.
   - Cancel Order ve Bulk Cancel endpoint'leri her order'ın `reservationId` değeri için `ReleaseBatch` çağıracak; bulk cancel tek HTTP isteği olsa bile InventoryService tarafında release işlemi rezervasyon bazında idempotent kalacak.

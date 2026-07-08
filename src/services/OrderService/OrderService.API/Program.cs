@@ -1,5 +1,5 @@
-using InventoryReservationSystem.Contracts.Inventory;
 using OrderService.API.Endpoints;
+using OrderService.Application;
 using OrderService.Infrastructure;
 using OrderService.Infrastructure.CollectionInitializers;
 using Scalar.AspNetCore;
@@ -8,14 +8,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 
+builder.Services.AddApplicationServices();
 builder.Services.AddInfrastructureServices(builder.Configuration);
 
-
 builder.Services.AddOpenApi();
-builder.Services.AddGrpcClient<InventoryReservations.InventoryReservationsClient>(options =>
-{
-    options.Address = new Uri(builder.Configuration["InventoryService:Address"]!);
-});
 
 var app = builder.Build();
 

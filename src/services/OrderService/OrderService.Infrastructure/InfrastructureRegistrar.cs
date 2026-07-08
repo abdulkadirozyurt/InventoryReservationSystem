@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using InventoryReservationSystem.Contracts.Inventory;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
 using OrderService.Application.Orders.Abstractions;
@@ -7,6 +8,7 @@ using OrderService.Infrastructure.CollectionInitializers;
 using OrderService.Infrastructure.HealthChecks;
 using OrderService.Infrastructure.Mongo;
 using OrderService.Infrastructure.Repositories.Orders;
+using OrderService.Infrastructure.Services;
 
 namespace OrderService.Infrastructure;
 
@@ -44,6 +46,11 @@ public static class InfrastructureRegistrar
         services.AddScoped<IOrderRepository, OrderRepository>();
         services.AddScoped<IOrderHistoryRepository, OrderHistoryRepository>();
         services.AddScoped<IOrderUnitOfWork, OrderUnitOfWork>();
+        services.AddScoped<IInventoryReservationService, InventoryReservationService>();
+        services.AddGrpcClient<InventoryReservations.InventoryReservationsClient>(options =>
+        {
+            options.Address = new Uri(configuration["InventoryService:Address"]!);
+        });
 
         services.AddHealthChecks()
             .AddCheck<MongoDbHealthCheck>("mongodb")
