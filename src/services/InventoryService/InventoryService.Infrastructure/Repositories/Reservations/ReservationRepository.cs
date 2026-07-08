@@ -71,18 +71,34 @@ public sealed class ReservationRepository(
             var filter = Builders<Reservation>.Filter.Eq(existingReservation => existingReservation.ReservationId, reservation.ReservationId);
 
             var session = mongoSessionProvider.CurrentSession;
+            ReplaceOneResult result;
+
             if (session is not null)
             {
-                await _collection.ReplaceOneAsync(
+                result = await _collection.ReplaceOneAsync(
                     session,
                     filter,
                     reservation,
                     cancellationToken: cancellationToken);
-
-                return;
+            }
+            else
+            {
+                result = await _collection.ReplaceOneAsync(filter, reservation, cancellationToken: cancellationToken);
             }
 
-            await _collection.ReplaceOneAsync(filter, reservation, cancellationToken: cancellationToken);
+            // Update sessizce 0 document etkilerse release başarılı sanılır; bu yüzden explicit hata fırlatılır.
+            if (result.MatchedCount == 0)
+            {
+                logger.LogWarning(
+                    "MongoDB reservation update matched no documents. ReservationId: {ReservationId}, OrderId: {OrderId}, ErrorCategory: {ErrorCategory}",
+                    reservation.ReservationId,
+                    reservation.OrderId,
+                    "ReservationUpdateNotMatched");
+
+                throw new InventoryStoreUnavailableException(
+                    "Inventory store is unavailable while updating reservation",
+                    new InvalidOperationException("Reservation update matched no documents."));
+            }
         }
         catch (MongoException exception)
         {

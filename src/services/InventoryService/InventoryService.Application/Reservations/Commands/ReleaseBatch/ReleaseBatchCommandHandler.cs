@@ -145,6 +145,13 @@ public sealed class ReleaseBatchCommandHandler(
                     return;
                 }
 
+                // Lock beklerken reservation içeriği değişirse eski request ile devam etmeyiz.
+                if (!ItemsMatchReservation(command.Items, currentReservation.Items))
+                {
+                    transactionResult = new ReleaseBatchResult(false, ItemMismatch, "Request items do not match reservation items.");
+                    return;
+                }
+
                 // Önce tüm stok satırları doğrulanır; sonra update yapılır. Böylece partial update riski azalır.
                 var currentReleaseItems = AggregateReservationItems(currentReservation.Items);
                 var inventoryItems = new List<Domain.Inventory.InventoryItem>();
@@ -273,7 +280,11 @@ public sealed class ReleaseBatchCommandHandler(
         if (string.IsNullOrWhiteSpace(command.CorrelationId))
             return new ReleaseBatchResult(false, ValidationFailure, "Correlation ID is required.");
 
-        // Items boş olabilir; reservation kaydı zaten gerçek item listesini taşır.
+        // ReleaseBatch contract'ı items[] taşır; boş liste belirsiz "hepsini release et" anlamına gelmesin.
+        if (command.Items.Count == 0)
+            return new ReleaseBatchResult(false, ValidationFailure, "Items are required.");
+
+        // Item değerleri DB kaydıyla ayrıca eşleştirilecek; burada sadece temel shape doğrulanır.
         foreach (var item in command.Items)
         {
             if (string.IsNullOrWhiteSpace(item.Sku))

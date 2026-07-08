@@ -173,7 +173,7 @@ Update this file when a service boundary, communication pattern, or structural c
   - Başarılı rezervasyonlarda `InventoryTransactions` koleksiyonuna `Reserve` audit kaydı yazılacak.
   - Stok yetersizliği, lock timeout, transaction rollback, cancellation ve transient Mongo/Redis hataları correlation id ile technical log olarak yazılacak.
   - Aynı SKU'ları veya kesişen SKU/depo setlerini hedefleyen eş zamanlı batch'lerin, lock sırası sayesinde birbirini bekleyip sırayla işlenmesi ve hiçbirinin overbooking'e yol açmaması garanti altına alınacak.
-- [ ] **Adım 3.3: ReleaseBatch(items[]) Metodunun Yazılması**
+- [x] **Adım 3.3: ReleaseBatch(items[]) Metodunun Yazılması**
   - Aynı deterministik SKU+depo kilit sırasını kullanarak rezervasyonları serbest bırakacak (Stoku geri iade edecek) metot yazılacak.
   - `Release` hareketinde `quantityReserved` azaltılacak ve `quantityAvailable` aynı miktarda artırılacak.
   - `Reservations` kaydı `Released` veya expiry akışından geliyorsa `Expired` durumuna geçirilecek.

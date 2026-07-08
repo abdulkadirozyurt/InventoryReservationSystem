@@ -1,14 +1,15 @@
 using Grpc.Core;
 using InventoryReservationSystem.Contracts.Inventory;
 using InventoryService.Application.Inventory.Queries;
-using InventoryService.Application.Reservations.Commands.Reserve;
+using InventoryService.Application.Reservations.Commands.ReleaseBatch;
 using InventoryService.Application.Reservations.Commands.ReserveBatch;
 
 namespace InventoryService.API.Grpc;
 
 public sealed class InventoryGrpcService(
     GetStockQueryHandler getStockQueryHandler,
-    ReserveBatchCommandHandler reserveBatchCommandHandler) : InventoryReservations.InventoryReservationsBase
+    ReserveBatchCommandHandler reserveBatchCommandHandler,
+    ReleaseBatchCommandHandler releaseBatchCommandHandler) : InventoryReservations.InventoryReservationsBase
 {
     public override async Task<ReserveBatchResponse> ReserveBatch(ReserveBatchRequest request, ServerCallContext context)
     {
@@ -52,15 +53,27 @@ public sealed class InventoryGrpcService(
         return Task.FromResult(response);
     }
 
-    public override Task<ReleaseBatchResponse> ReleaseBatch(ReleaseBatchRequest request, ServerCallContext context)
+    public override async Task<ReleaseBatchResponse> ReleaseBatch(ReleaseBatchRequest request, ServerCallContext context)
     {
+        // gRPC contract tipi API sınırında kalır; Application katmanına command modeli gider.
+        var command = new ReleaseBatchCommand(
+            request.ReservationId,
+            request.Items.Select(item => new ReleaseBatchItemCommand(item.Sku, item.WarehouseId, item.Quantity)).ToArray(),
+            request.Metadata?.CorrelationId ?? string.Empty);
+
+        // İş kuralı handler içindedir: idempotency, lock, transaction, audit ve status update.
+        var result = await releaseBatchCommandHandler.HandleAsync(command, context.CancellationToken);
+
+        // Application result proto response'a çevrilir; correlation metadata response'ta korunur.
         var response = new ReleaseBatchResponse
         {
-            Success = true,
+            Success = result.Success,
+            ErrorCode = result.ErrorCode ?? string.Empty,
+            ErrorMessage = result.ErrorMessage ?? string.Empty,
             Metadata = CreateMetadata(request.Metadata)
         };
 
-        return Task.FromResult(response);
+        return response;
     }
 
     public override async Task<GetStockResponse> GetStock(GetStockRequest request, ServerCallContext context)

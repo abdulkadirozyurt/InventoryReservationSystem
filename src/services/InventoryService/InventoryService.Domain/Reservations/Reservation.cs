@@ -11,7 +11,6 @@ public sealed class Reservation
     {
     }
 
-    [BsonConstructor]
     public Reservation(string reservationId, string orderId, List<ReservationItem> items, DateTime expiresAt)
     {
         if (items is null)

@@ -1,4 +1,5 @@
 using InventoryService.Application.Inventory.Queries;
+using InventoryService.Application.Reservations.Commands.ReleaseBatch;
 using InventoryService.Application.Reservations.Commands.ReserveBatch;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -10,6 +11,7 @@ public static class ApplicationRegistrar
     {
         services.AddScoped<GetStockQueryHandler>();
         services.AddScoped<ReserveBatchCommandHandler>();
+        services.AddScoped<ReleaseBatchCommandHandler>();
 
         return services;
     }

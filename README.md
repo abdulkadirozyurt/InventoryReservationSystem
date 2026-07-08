@@ -2,7 +2,7 @@
 
 Inventory Reservation System is an early-stage .NET microservice prototype for reserving stock for orders.
 
-Goal: keep order management and inventory reservation separate, then connect them through gRPC. MongoDB collection schemas, technical logging, Redis distributed lock infrastructure, stock lookup, and real ReserveBatch reservation behavior are in place. Release, confirm, expiry, idempotency, and operational reservation workflows are still in progress.
+Goal: keep order management and inventory reservation separate, then connect them through gRPC. MongoDB collection schemas, technical logging, Redis distributed lock infrastructure, stock lookup, real ReserveBatch reservation behavior, and idempotent ReleaseBatch stock restoration are in place. Confirm, expiry, and operational reservation workflows are still in progress.
 
 ## Current status
 
@@ -10,7 +10,7 @@ Goal: keep order management and inventory reservation separate, then connect the
 - Two API services exist: `OrderService.API` and `InventoryService.API`.
 - Shared gRPC contract project exists and generates C# stubs from physically split proto files under `src/contracts/InventoryReservationSystem.Contracts/Protos`.
 - `OrderService.API` exposes a minimal order creation endpoint and calls `InventoryService.API` over gRPC.
-- `InventoryService.API` exposes a gRPC service; `GetStock(sku, warehouseId?)` and `ReserveBatch(items[])` are wired to Application and MongoDB, while release, confirm, and operational methods still use placeholder responses.
+- `InventoryService.API` exposes a gRPC service; `GetStock(sku, warehouseId?)`, `ReserveBatch(items[])`, and `ReleaseBatch(reservationId, items[])` are wired to Application and MongoDB. Confirm and operational methods still use placeholder responses.
 - InventoryService initializes MongoDB schemas for `InventoryItems`, `Reservations`, and `InventoryTransactions` with validation rules and indexes.
 - InventoryService has Redis distributed lock infrastructure with deterministic lock ordering, Polly retry, lock TTL, safe token-based release, and structured Serilog lock logs.
 - InventoryService writes technical logs through Serilog to console and MongoDB `ApplicationLogs`.

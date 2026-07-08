@@ -30,7 +30,8 @@ public sealed class InventoryUnitOfWork(
         {
             if (session.IsInTransaction)
             {
-                await session.AbortTransactionAsync(cancellationToken);
+                // Dış token iptal edilmiş olabilir; rollback yine de denenmeli ki transaction açık kalmasın.
+                await session.AbortTransactionAsync(CancellationToken.None);
             }
 
             logger.LogError(
