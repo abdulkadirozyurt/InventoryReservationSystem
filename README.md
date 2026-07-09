@@ -75,11 +75,72 @@ flowchart TD
 - **OpenTelemetry Metrics & Health Infrastructure**: Integration with .NET Aspire ServiceDefaults, exposing `/health` (liveness) and `/health/ready` (readiness) endpoints mapped to Mongo and Redis states. InventoryService emits low-cardinality metrics for Redis lock acquisition/ownership, TTL exceeded detection, reservation operation duration/failures, time-to-reserve, time-to-confirmation, and operational stock adjustments.
 - **Order Persistence & Lifecycle Endpoints**: OrderService persists created orders and `OrderHistory`, lists/reads orders from MongoDB, and confirms/cancels orders by calling InventoryService through Application-layer use cases.
 - **Redis-Based Create-Order Idempotency**: `POST /api/orders` requires a client-generated `Idempotency-Key`. Redis atomically claims the first request, caches the completed HTTP response, replays same-key/same-body retries without MongoDB or gRPC work, rejects same-key/different-body conflicts, and briefly waits for concurrent duplicates to finish.
+- **Polly gRPC Resilience & Graceful Degradation**: OrderService calls InventoryService through a shared Polly pipeline with per-attempt timeout, retry, and circuit breaker. When InventoryService is unavailable, slow, or circuit-open, OrderService returns explicit 503/504 responses and does not create a `Pending` order.
 
 ### Planned Features (Roadmap)
 - **Automatic Expiration Engine**: A background worker that periodically scans for expired `Pending` reservations (10-minute TTL) and releases them, utilizing a MongoDB checkpoint system to resume safely after crashes.
-- **Polly gRPC Resilience**: Implementing retry, timeout, and circuit breaker policies on the gRPC client side.
 - **Advanced Inventory Workflows**: Multi-warehouse fallback, automated warehouse rebalancing, low-stock alerts, and snapshot/restore utilities.
+
+---
+
+## Resilience & Graceful Degradation
+
+OrderService protects InventoryService gRPC calls with a single shared resilience pipeline:
+
+| Layer | Default | Purpose |
+|---|---:|---|
+| Timeout | 3 seconds per attempt | Slow gRPC attempts are cut instead of holding the HTTP request forever. |
+| Retry | 3 attempts, exponential backoff, 200ms base | Transient gRPC failures get another chance before the API fails. |
+| Circuit Breaker | 50% failure ratio, 30s window, 15s break | When InventoryService keeps failing, new calls fail fast with 503 instead of making the outage worse. |
+
+Pipeline order is **Circuit Breaker -> Retry -> Timeout**. Timeout is innermost, so each retry attempt has its own deadline. Circuit breaker is outermost, so it sees the final call outcome after retries.
+
+HTTP mapping:
+
+| Failure | HTTP |
+|---|---:|
+| Circuit open (`BrokenCircuitException`) | 503 |
+| InventoryService unavailable (`RpcException: Unavailable`) | 503 |
+| Slow dependency / timeout (`TimeoutRejectedException`, `DeadlineExceeded`, timeout-backed `Cancelled`) | 504 |
+| Inventory conflict (`AlreadyExists`, `FailedPrecondition`) | 409 |
+| Unexpected downstream gRPC failure | 502 |
+
+Create-order graceful degradation rules:
+
+- InventoryService down, slow, or circuit-open means OrderService returns 503/504.
+- OrderService does **not** create a `Pending` order from stale inventory assumptions.
+- `Idempotency-Key` deterministically produces the same order number on retry, so timeout retries do not create a new InventoryService reservation identity.
+- Transient failure releases the Redis `Processing` claim with a Lua script only if the key is still `Processing` and the request hash still matches. This avoids deleting another request's claim.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant OrderAPI as OrderService API
+    participant Redis
+    participant Polly
+    participant Inventory as InventoryService gRPC
+    participant Mongo
+
+    Client->>OrderAPI: POST /api/orders + Idempotency-Key
+    OrderAPI->>Redis: claim key as Processing
+    alt replay completed
+        Redis-->>OrderAPI: cached response
+        OrderAPI-->>Client: same HTTP response
+    else first attempt
+        OrderAPI->>Polly: ReserveBatch(orderNumber from key)
+        alt InventoryService available
+            Polly->>Inventory: gRPC ReserveBatch
+            Inventory-->>Polly: reservationId
+            OrderAPI->>Mongo: insert order + history
+            OrderAPI->>Redis: mark Completed
+            OrderAPI-->>Client: 201 Created
+        else timeout / unavailable / circuit open
+            Polly-->>OrderAPI: dependency exception
+            OrderAPI->>Redis: atomic ReleaseClaim if still Processing + same hash
+            OrderAPI-->>Client: 503 or 504
+        end
+    end
+```
 
 ---
 
@@ -91,7 +152,7 @@ flowchart TD
 - **Observability Collectors**: [Grafana Alloy 1.17](https://grafana.com/docs/alloy/latest/)
 - **Metrics, Logs & Traces**: [Prometheus 3.7](https://prometheus.io/), [Grafana Loki 3.7](https://grafana.com/oss/loki/), [Grafana Tempo](https://grafana.com/oss/tempo/)
 - **Observability UI**: [Grafana 13.0](https://grafana.com/) & [RedisInsight 3.6](https://redis.com/redis-enterprise/redisinsight/)
-- **Resilience**: [Polly](https://github.com/App-vNext/Polly) (Used for Redis lock acquisition retries)
+- **Resilience**: [Polly](https://github.com/App-vNext/Polly) (Redis lock acquisition retries plus OrderService gRPC timeout/retry/circuit breaker pipeline)
 - **Logging**: [Serilog](https://serilog.net/) (Structured logging to Console and MongoDB)
 - **API Documentation**: [Scalar](https://github.com/scalar/scalar) (REST API Reference playground)
 

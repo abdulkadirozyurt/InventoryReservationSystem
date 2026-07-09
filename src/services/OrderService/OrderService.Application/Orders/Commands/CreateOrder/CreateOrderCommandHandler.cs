@@ -13,12 +13,27 @@ public sealed class CreateOrderCommandHandler(
 {
     public async Task<CreateOrderResult> HandleAsync(CreateOrderCommand command, CancellationToken cancellationToken = default)
     {
-        var orderNumber = Guid.CreateVersion7().ToString("N");
+        var orderNumber = command.OrderNumber;
 
         logger.LogInformation(
             "Creating order. OrderNumber: {OrderNumber}, CorrelationId: {CorrelationId}",
             orderNumber,
             command.CorrelationId);
+
+        var existingOrder = await orderRepository.GetByOrderNumberAsync(orderNumber, cancellationToken);
+
+        if (existingOrder is not null)
+        {
+            // Aynı idempotency operation tekrar çalışırsa aynı order number üretilir.
+            // Order daha önce kaydedildiyse InventoryService'e tekrar gidip stok düşürmüyoruz.
+            logger.LogInformation(
+                "Create order replay returned existing order. OrderNumber: {OrderNumber}, ReservationId: {ReservationId}, CorrelationId: {CorrelationId}",
+                existingOrder.OrderNumber,
+                existingOrder.ReservationId,
+                command.CorrelationId);
+
+            return new CreateOrderResult(true, existingOrder.OrderNumber, existingOrder.ReservationId, []);
+        }
 
         var reservationItems = command.Items
             .Select(item => new InventoryReservationItem(item.Sku, item.WarehouseId, item.Quantity))

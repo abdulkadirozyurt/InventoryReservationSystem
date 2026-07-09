@@ -157,15 +157,44 @@ public sealed class RedisIdempotencyStore(IDatabase redisDatabase, IdempotencyOp
             CreatedAtUtc = DateTimeOffset.UtcNow
         };
 
+        // Processing -> Completed geçişi atomik olmak zorunda.
+        // Script Redis'teki mevcut kaydı okur, kaydın hâlâ Processing durumda olduğunu
+        // ve aynı requestHash'e ait olduğunu doğrular. Şartlar sağlanırsa response'u
+        // Completed TTL ile yazar; aksi halde 0 döner ve eski worker yeni sahibi ezemez.
+        const string completeScript = """
+            local value = redis.call('GET', KEYS[1])
+            if not value then
+                return 0
+            end
 
+            local entry = cjson.decode(value)
+            if entry.state ~= 'Processing' then
+                return 0
+            end
+
+            if entry.requestHash ~= ARGV[1] then
+                return 0
+            end
+
+            redis.call('PSETEX', KEYS[1], ARGV[2], ARGV[3])
+            return 1
+            """;
 
         try
         {
-            await redisDatabase.StringSetAsync(
-                BuildKey(idempotencyKey),
-                JsonSerializer.Serialize(completedEntry, JsonOptions),
-                options.CompletedTtl,
-                When.Always);
+            // Complete işlemi de claim release gibi sahiplik kontrolü yapar.
+            // Eğer Processing TTL dolup aynı key başka request tarafından sahiplenildiyse eski worker yeni state'i ezemez.
+            var result = await redisDatabase.ScriptEvaluateAsync(
+                completeScript,
+                [BuildKey(idempotencyKey)],
+                [requestHash, (long)options.CompletedTtl.TotalMilliseconds, JsonSerializer.Serialize(completedEntry, JsonOptions)]);
+
+            if ((long)result == 0)
+            {
+                logger.LogWarning(
+                    "Idempotency completion skipped because the processing claim no longer belongs to this request. IdempotencyKey: {IdempotencyKey}",
+                    idempotencyKey);
+            }
         }
         catch (RedisTimeoutException ex)
         {
@@ -185,6 +214,76 @@ public sealed class RedisIdempotencyStore(IDatabase redisDatabase, IdempotencyOp
 
 
 
+
+    public async Task<bool> ReleaseClaimAsync(
+        string idempotencyKey,
+        string requestHash,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        // Başarısız/iptal edilen işlemde Processing claim'i sadece aynı request'e aitse bırakılır.
+        // Script mevcut kaydı okur, state ve requestHash kontrolünü yapar, sonra aynı atomik adımda siler.
+        // Böylece TTL dolduktan sonra aynı key'i sahiplenen başka bir request yanlışlıkla silinmez.
+        const string releaseScript = """
+            local value = redis.call('GET', KEYS[1])
+            if not value then
+                return 0
+            end
+
+            local entry = cjson.decode(value)
+            if entry.state ~= 'Processing' then
+                return 0
+            end
+
+            if entry.requestHash ~= ARGV[1] then
+                return 0
+            end
+
+            return redis.call('DEL', KEYS[1])
+            """;
+
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // GET, state/hash kontrolü ve DEL tek Lua script içinde atomik çalışır.
+            // Ayrı ayrı komut kullansaydık kontrol ile silme arasında başka request aynı key'i sahiplenebilirdi.
+            var result = await redisDatabase.ScriptEvaluateAsync(
+                releaseScript,
+                [BuildKey(idempotencyKey)],
+                [requestHash]);
+
+            var released = (long)result == 1;
+
+            logger.LogInformation(
+                "Idempotency processing claim release finished. IdempotencyKey: {IdempotencyKey}, Released: {Released}, CorrelationId: {CorrelationId}",
+                idempotencyKey,
+                released,
+                correlationId);
+
+            return released;
+        }
+        catch (RedisTimeoutException exception)
+        {
+            logger.LogError(
+                exception,
+                "Idempotency Redis claim release timed out. IdempotencyKey: {IdempotencyKey}, CorrelationId: {CorrelationId}",
+                idempotencyKey,
+                correlationId);
+
+            return false;
+        }
+        catch (RedisException exception)
+        {
+            logger.LogError(
+                exception,
+                "Idempotency Redis claim release failed. IdempotencyKey: {IdempotencyKey}, CorrelationId: {CorrelationId}",
+                idempotencyKey,
+                correlationId);
+
+            return false;
+        }
+    }
 
     private static RedisKey BuildKey(string idempotencyKey) => $"order-service:idempotency:{idempotencyKey}";
 }

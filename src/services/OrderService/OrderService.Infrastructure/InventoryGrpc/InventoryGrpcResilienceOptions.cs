@@ -14,6 +14,11 @@ public sealed class InventoryGrpcResilienceOptions
     public const string SectionName = "InventoryGrpcResilience";
 
     /// <summary>
+    /// Maximum number of seconds allowed for one InventoryService gRPC attempt.
+    /// </summary>
+    public int TimeoutSeconds { get; init; } = 3;
+
+    /// <summary>
     /// Number of extra attempts after the first gRPC call fails.
     /// </summary>
     public int RetryCount { get; init; } = 3;

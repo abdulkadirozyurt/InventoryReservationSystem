@@ -38,6 +38,20 @@ public interface IIdempotencyStore
     /// A task that represents the asynchronous operation.
     /// </returns>
     Task CompleteAsync(string idempotencyKey, string requestHash, int statusCode, string responseBody, string contentType, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Releases a processing claim only when it still belongs to the same request hash.
+    /// </summary>
+    /// <param name="idempotencyKey">The client-provided idempotency key.</param>
+    /// <param name="requestHash">The hash that owns the processing claim.</param>
+    /// <param name="correlationId">The correlation identifier used in technical logs.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>True when the matching processing claim was deleted; otherwise false.</returns>
+    Task<bool> ReleaseClaimAsync(
+        string idempotencyKey,
+        string requestHash,
+        string correlationId,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>

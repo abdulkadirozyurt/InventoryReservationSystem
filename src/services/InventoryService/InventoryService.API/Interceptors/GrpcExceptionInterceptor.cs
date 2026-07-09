@@ -25,6 +25,16 @@ public sealed class GrpcExceptionInterceptor(ILogger<GrpcExceptionInterceptor> l
                 StatusCode.Unavailable,
                 "Inventory storage is unavailable.");
         }
+        catch (DuplicateReservationException exception)
+        {
+            // Aynı order için ikinci reservation yazımı Mongo unique index tarafından reddedildi.
+            // Bunu internal server error yerine istemcinin anlayabileceği AlreadyExists status'u olarak döndürüyoruz.
+            LogException(exception, context, StatusCode.AlreadyExists);
+
+            throw CreateRpcException(
+                StatusCode.AlreadyExists,
+                "Reservation already exists for this order.");
+        }
         catch (TimeoutException exception)
         {
             LogException(exception, context, StatusCode.DeadlineExceeded);

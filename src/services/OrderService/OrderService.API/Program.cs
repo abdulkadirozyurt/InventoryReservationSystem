@@ -1,4 +1,5 @@
 using OrderService.API.Endpoints;
+using OrderService.API.Infrastructure;
 using OrderService.Application;
 using OrderService.Infrastructure;
 using OrderService.Infrastructure.CollectionInitializers;
@@ -11,6 +12,9 @@ builder.AddServiceDefaults();
 builder.Services.AddApplicationServices();
 builder.Services.AddInfrastructureServices(builder.Configuration);
 
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<OrderServiceExceptionHandler>();
+
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
@@ -18,6 +22,7 @@ var app = builder.Build();
 await app.Services.GetRequiredService<MongoCollectionInitializer>().InitializeAsync();
 
 app.UseCorrelationId();
+app.UseExceptionHandler();
 
 
 //if (app.Environment.IsDevelopment())

@@ -1,4 +1,5 @@
 using InventoryReservationSystem.Contracts.Inventory;
+using Microsoft.Extensions.Options;
 using OrderService.Application.Orders.Abstractions;
 using OrderService.Infrastructure.InventoryGrpc;
 
@@ -6,7 +7,8 @@ namespace OrderService.Infrastructure.Services;
 
 public sealed class InventoryReservationService(
     InventoryReservations.InventoryReservationsClient client,
-    InventoryGrpcResilienceExecutor resilienceExecutor) : IInventoryReservationService
+    InventoryGrpcResilienceExecutor resilienceExecutor,
+    IOptions<InventoryGrpcResilienceOptions> options) : IInventoryReservationService
 {
     public async Task<InventoryReservationResult> ReserveBatchAsync(
         string orderId,
@@ -29,7 +31,7 @@ public sealed class InventoryReservationService(
 
         // Bu çağrı InventoryService'e gider. Geçici gRPC hatalarında Polly retry/circuit breaker devreye girer.
         var response = await ExecuteWithResiliencePipeline(
-            token => client.ReserveBatchAsync(request, cancellationToken: token).ResponseAsync,
+            token => client.ReserveBatchAsync(request, deadline: CreateGrpcDeadline(), cancellationToken: token).ResponseAsync,
             cancellationToken);
 
         return new InventoryReservationResult(
@@ -63,7 +65,7 @@ public sealed class InventoryReservationService(
 
         // Release işlemi de geçici servis ve ağ hatalarına karşı aynı ortak pipeline'ı kullanır.
         var response = await ExecuteWithResiliencePipeline(
-            token => client.ReleaseBatchAsync(request, cancellationToken: token).ResponseAsync,
+            token => client.ReleaseBatchAsync(request, deadline: CreateGrpcDeadline(), cancellationToken: token).ResponseAsync,
             cancellationToken);
         return new InventoryReservationOperationResult(response.Success, response.ErrorCode, response.ErrorMessage);
     }
@@ -81,7 +83,7 @@ public sealed class InventoryReservationService(
 
         // Confirm çağrısı başarısız olduğunda transient hatalar ortak pipeline tarafından yönetilir.
         var response = await ExecuteWithResiliencePipeline(
-            token => client.ConfirmReservationAsync(request, cancellationToken: token).ResponseAsync,
+            token => client.ConfirmReservationAsync(request, deadline: CreateGrpcDeadline(), cancellationToken: token).ResponseAsync,
             cancellationToken);
         return new InventoryReservationOperationResult(response.Success, response.ErrorCode, response.ErrorMessage);
     }
@@ -93,5 +95,12 @@ public sealed class InventoryReservationService(
         return await resilienceExecutor.ExecuteAsync(
             token => operation(token),
             cancellationToken);
+    }
+
+    private DateTime CreateGrpcDeadline()
+    {
+        // Polly timeout token'ı keser; gRPC bazen bunu Cancelled olarak raporlar.
+        // Deadline verirsek gRPC kendi timeout'unu bilir ve DeadlineExceeded status'u üretir.
+        return DateTime.UtcNow.AddSeconds(options.Value.TimeoutSeconds);
     }
 }

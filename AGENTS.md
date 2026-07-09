@@ -176,13 +176,13 @@ Update this file when a service boundary, communication pattern, or structural c
   - Create Order endpoint'ine gelen isteklerin `Idempotency-Key` başlığı Redis üzerinde kontrol edilecek.
   - Aynı isteğin **her tekrarında** (tekrar sayısı sınırsız — 5 kez, 50 kez fark etmez), veritabanına veya gRPC'ye tekrar gitmeden hafızadaki aynı sonuç doğrudan dönülecek. ("5 keze kadar" gibi bir üst sınır yok; idempotency garantisi tekrar sayısından bağımsız olacak.)
   - Idempotency hit/miss, replay response, key conflict, Redis timeout ve cache write/read failure durumları correlation id ile loglanacak.
-- [ ] **Adım 4.4: Polly ile gRPC İletişiminin Güvenli Hale Getirilmesi**
-  - OrderService, InventoryService'i ararken `ReserveBatch`, `ReleaseBatch`, `ConfirmReservation`, `GetStock` ve gerekli operasyonel envanter çağrıları için Polly politikalarını kullanacak.
-  - InventoryService tarafında global gRPC exception interceptor eklenecek; system exception'lar şu an loglanıp rethrow ediliyor, interceptor olmadan client'a uygun gRPC status code dönmeyebilir.
-  - OrderService tarafında `RpcException` uygun HTTP cevaplarına (ör. `Unavailable` -> 503, timeout -> 504) maplenecek.
-  - Geçici hatalar için **Retry**, InventoryService yavaşladığında veya çöktüğünde sistemi yormamak için **Circuit Breaker** (Devre Kesici) mekanizmaları devreye alınacak.
-  - Retry denemeleri, timeout, circuit breaker open/half-open/closed durum değişimleri ve fallback/ret kararları technical log olarak yazılacak.
-  - **Graceful Degradation davranışı somut olarak tanımlanacak:** Circuit breaker "open" durumundayken gelen create-order istekleri; (a) hemen 503/kullanıcı dostu hata ile reddedilecek ve istemciye tekrar deneme önerisi dönecek, (b) sistem InventoryService'in son bilinen durumuna göre kaba bir ön-kontrol yapmayacak (stale veriyle yanlış onay vermemek için) — yani InventoryService erişilemezken order "Pending" olarak bile açılmayacak, sadece açıkça reddedilecek. Bu davranış test edilebilir bir kural olarak dokümante edilecek.
+- [X] **Adım 4.4: Polly ile gRPC İletişiminin Güvenli Hale Getirilmesi**
+  - OrderService, InventoryService'i ararken `ReserveBatch`, `ReleaseBatch`, `ConfirmReservation` ve mevcut operasyonel envanter çağrıları için ortak `InventoryGrpcResilienceExecutor` pipeline'ını kullanıyor.
+  - InventoryService tarafında global `GrpcExceptionInterceptor` etkin; `InventoryStoreUnavailableException`, `DuplicateReservationException`, `TimeoutException`, `ArgumentException` ve beklenmeyen hatalar safe gRPC status code'larına mapleniyor.
+  - OrderService tarafında dependency exception mapping merkezi `OrderServiceExceptionHandler` ile yapılıyor: circuit open ve unavailable -> 503, timeout/deadline/cancelled timeout -> 504, conflict -> 409, beklenmeyen downstream gRPC -> 502.
+  - Geçici hatalar için retry, yavaş çağrılar için per-attempt timeout, sürekli arızalar için circuit breaker aktif. Defaults: 3sn timeout, 3 retry, 200ms base delay, %50 failure ratio, 30sn sampling, 15sn break duration.
+  - Retry, timeout, circuit breaker ve idempotency claim release akışları structured log üretiyor; runtime doğrulamada claim release ve circuit-open fail-fast logları gözlendi.
+  - **Graceful Degradation davranışı doğrulandı:** InventoryService unavailable iken create-order 503 dönüyor ve Mongo'da Pending order oluşmuyor; InventoryService yavaş/paused iken 504 dönüyor; circuit breaker open durumunda fail-fast 503 dönüyor; transient failure sonrası Redis Processing claim atomic Lua script ile release ediliyor ve aynı Idempotency-Key başarılı şekilde retry edilebiliyor.
 
 ### Live Project State
 

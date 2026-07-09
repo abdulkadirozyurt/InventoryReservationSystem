@@ -1,6 +1,7 @@
 namespace OrderService.Application.Orders.Commands.CreateOrder;
 
 public sealed record CreateOrderCommand(
+    string OrderNumber,
     IReadOnlyList<CreateOrderItemCommand> Items,
     string CorrelationId);
 

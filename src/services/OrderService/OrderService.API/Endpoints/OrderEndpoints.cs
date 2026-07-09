@@ -1,5 +1,8 @@
 using System.Text.Json;
+using Grpc.Core;
 using Microsoft.Extensions.Logging;
+using Polly.CircuitBreaker;
+using Polly.Timeout;
 using OrderService.Application.Orders.Abstractions;
 using OrderService.Application.Orders.Commands.BulkCancelOrders;
 using OrderService.Application.Orders.Commands.CancelOrder;
@@ -171,11 +174,33 @@ public static class OrderEndpoints
 
         #endregion
 
+        // Order number aynı Idempotency-Key ve aynı request body hash'inden deterministik üretilir.
+        // Böylece aynı retry aynı order'a gider; aynı key farklı body ise farklı order number üretir ve conflict kuralını bozmaz.
+        var orderNumber = IdempotencyOrderNumberGenerator.Generate(idempotencyKey, requestHash);
+
         var command = new CreateOrderCommand(
+            orderNumber,
             request.Items.Select(item => new CreateOrderItemCommand(item.Sku, item.WarehouseId, item.Quantity)).ToArray(),
             GetCorrelationId(context));
 
-        var result = await handler.HandleAsync(command, cancellationToken);
+        CreateOrderResult result;
+
+        try
+        {
+            result = await handler.HandleAsync(command, cancellationToken);
+        }
+        catch (Exception exception) when (ShouldReleaseIdempotencyClaim(exception))
+        {
+            // Bu hata InventoryService'e güvenli şekilde ulaşılamadığını gösterir.
+            // Claim'i kör silmiyoruz; Redis yalnız aynı request hash hâlâ Processing durumundaysa siliyor.
+            await idempotencyStore.ReleaseClaimAsync(
+                idempotencyKey,
+                requestHash,
+                correlationId,
+                cancellationToken);
+
+            throw;
+        }
 
         var responseBody = new CreateOrderResponse(
             result.Success,
@@ -314,6 +339,29 @@ public static class OrderEndpoints
     private static CancelOrderResponse MapCancelResponse(OrderOperationResult result)
     {
         return new CancelOrderResponse(result.OrderNumber, result.Success, result.ErrorCode, result.ErrorMessage);
+    }
+
+    private static bool ShouldReleaseIdempotencyClaim(Exception exception)
+    {
+        // Circuit açıksa çağrı InventoryService'e gönderilmeden reddedilir; bu yüzden claim'i bırakmak güvenlidir.
+        if (exception is BrokenCircuitException)
+            return true;
+
+        // Polly timeout sonrası aynı Idempotency-Key aynı OrderNumber ürettiği için retry güvenlidir.
+        // Claim bırakılırsa client aynı key ile yeniden deneyebilir, InventoryService aynı OrderId üzerinden replay yapar.
+        if (exception is TimeoutRejectedException)
+            return true;
+
+        if (exception is RpcException rpcException)
+        {
+            // Bağlantı kurulamadığında gRPC katmanı bazen Unavailable yerine Cancelled döndürebilir.
+            // Üç durum da retry edilebilir dependency failure olduğu için claim güvenli biçimde bırakılır.
+            return rpcException.StatusCode is StatusCode.Unavailable
+                or StatusCode.Cancelled
+                or StatusCode.DeadlineExceeded;
+        }
+
+        return false;
     }
 
     private static string GetCorrelationId(HttpContext context)
