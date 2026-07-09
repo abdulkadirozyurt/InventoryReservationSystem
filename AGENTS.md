@@ -174,7 +174,7 @@ Update this file when a service boundary, communication pattern, or structural c
   - Süre aşımı (expiry) veya iptal esnasında temiz bir şekilde serbest bırakılamayan, hata alan "yetim" sipariş/rezervasyon kayıtları manuel inceleme için Dead Letter yapısına taşınacak.
   - Tech stack içinde ayrı broker bulunmadığı için DLQ ilk aşamada MongoDB koleksiyonu veya gerekirse Redis listesi olarak tasarlanacak.
   - DLQ'ya taşınan her kayıt sebep, correlation id, reservation/order id ve hata kategorisiyle loglanacak.
-- [ ] **Adım 5.4: Envanter Mutabakat İşleyicisi (Inventory Reconciliation Job)**
+- [x] **Adım 5.4: Envanter Mutabakat İşleyicisi (Inventory Reconciliation Job)**
   - Belirli aralıklarla çalışıp beklenen sipariş/rezervasyon durumu ile gerçek envanter rezervasyon sayılarını (`quantityReserved`) karşılaştırıp tutarsızlıkları raporlayan bir job yazılacak.
   - Bu job servis sahipliğini bozmayacak: Order verisini OrderService API/read model üzerinden, envanter ve rezervasyon verisini InventoryService API/gRPC/read model üzerinden alacak.
   - OrderService, InventoryService'in MongoDB koleksiyonlarına; InventoryService de OrderService'in MongoDB koleksiyonlarına doğrudan erişmeyecek.

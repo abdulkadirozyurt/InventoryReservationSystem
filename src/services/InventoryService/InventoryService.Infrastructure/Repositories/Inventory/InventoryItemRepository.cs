@@ -98,4 +98,40 @@ public sealed class InventoryItemRepository(
             throw new InventoryStoreUnavailableException("Inventory store is unavailable while updating stock", exception);
         }
     }
+
+    public async Task<IReadOnlyDictionary<(string Sku, string WarehouseId), int>> GetReservedQuantitySnapshotAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Only items with actual reserved stock can create inventory-side drift, so zero-reserved rows are ignored for a small read-only snapshot.
+            var filter = Builders<InventoryItem>.Filter.Gt(item => item.QuantityReserved, 0);
+
+            List<InventoryItem> items;
+            var session = mongoSessionProvider.CurrentSession;
+            if (session is not null)
+            {
+                items = await _collection.Find(session, filter).ToListAsync(cancellationToken);
+            }
+            else
+            {
+                items = await _collection.Find(filter).ToListAsync(cancellationToken);
+            }
+
+            var result = items.ToDictionary(
+                item => (item.Sku, item.WarehouseId),
+                item => item.QuantityReserved
+            );
+
+            return result;
+        }
+        catch (MongoException exception)
+        {
+            logger.LogError(
+                exception,
+                "MongoDB failed while getting reserved quantity snapshot. ErrorCategory: {ErrorCategory}",
+                "TransientMongoError");
+
+            throw new InventoryStoreUnavailableException("Inventory store is unavailable while retrieving reserved quantity snapshot", exception);
+        }
+    }
 }

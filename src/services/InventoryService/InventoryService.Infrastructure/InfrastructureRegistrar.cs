@@ -24,7 +24,9 @@ public static class InfrastructureRegistrar
         services.Configure<MongoDbOptions>(configuration.GetSection(nameof(MongoDbOptions)));
         services.Configure<RedisOptions>(configuration.GetSection(nameof(RedisOptions)));
         services.Configure<ExpiryWorkerOptions>(configuration.GetSection(nameof(ExpiryWorkerOptions)));
+        services.Configure<ReconciliationWorkerOptions>(configuration.GetSection(nameof(ReconciliationWorkerOptions)));
         services.AddHostedService<ReservationExpiryBackgroundService>();
+        services.AddHostedService<InventoryReconciliationBackgroundService>();
 
         services.AddSingleton<IMongoClient>(_ =>
         {

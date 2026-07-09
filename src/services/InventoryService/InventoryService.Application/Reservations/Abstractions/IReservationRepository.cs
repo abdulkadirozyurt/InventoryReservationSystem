@@ -1,4 +1,5 @@
-﻿using InventoryService.Domain.Reservations;
+using InventoryService.Application.Reservations.Results.Reconciliation;
+using InventoryService.Domain.Reservations;
 
 namespace InventoryService.Application.Reservations.Abstractions;
 
@@ -44,4 +45,10 @@ public interface IReservationRepository
         string? lastReservationId,
         int limit,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets expected reserved quantities from pending reservations grouped by SKU+warehouse.
+    /// Reconciliation needs reservation/order ids in this snapshot so mismatch logs can point to affected business records without reading OrderService storage.
+    /// </summary>
+    Task<IReadOnlyCollection<ExpectedReservedQuantitySnapshot>> GetExpectedReservedQuantityBySkuWarehouseAsync(CancellationToken cancellationToken = default);
 }

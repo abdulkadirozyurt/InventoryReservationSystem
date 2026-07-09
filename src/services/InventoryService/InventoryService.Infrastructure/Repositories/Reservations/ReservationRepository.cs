@@ -1,5 +1,6 @@
 using InventoryService.Application.Inventory.Exceptions;
 using InventoryService.Application.Reservations.Abstractions;
+using InventoryService.Application.Reservations.Results.Reconciliation;
 using InventoryService.Domain.Reservations;
 using InventoryService.Infrastructure.Mongo;
 using Microsoft.Extensions.Logging;
@@ -219,6 +220,52 @@ public sealed class ReservationRepository(
                 "TransientMongoError");
 
             throw new InventoryStoreUnavailableException("Inventory store is unavailable while querying expired reservations", exception);
+        }
+    }
+
+    public async Task<IReadOnlyCollection<ExpectedReservedQuantitySnapshot>> GetExpectedReservedQuantityBySkuWarehouseAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var filter = Builders<Reservation>.Filter.Eq(r => r.Status, ReservationStatus.Pending);
+
+            List<Reservation> pendingReservations;
+            var session = mongoSessionProvider.CurrentSession;
+            if (session is not null)
+            {
+                pendingReservations = await _collection.Find(session, filter).ToListAsync(cancellationToken);
+            }
+            else
+            {
+                pendingReservations = await _collection.Find(filter).ToListAsync(cancellationToken);
+            }
+
+            // Architecture decisions:
+            // 1. Group by SKU+warehouse because inventory reserved quantity is stored at that exact physical stock granularity.
+            // 2. Keep this report-only: reconciliation must expose drift, not correct it while live reserve/release transactions may be running.
+            // 3. Keep this InventoryService-owned: order correlation is limited to stored OrderId values; no OrderService database/API read is needed for this MVP.
+            var result = pendingReservations
+                .SelectMany(r => r.Items.Select(item => new { Reservation = r, Item = item }))
+                .GroupBy(x => (x.Item.Sku, x.Item.WarehouseId))
+                .Select(group => new ExpectedReservedQuantitySnapshot(
+                    Sku: group.Key.Sku,
+                    WarehouseId: group.Key.WarehouseId,
+                    ExpectedReservedQuantity: group.Sum(x => x.Item.Quantity),
+                    ReservationIds: group.Select(x => x.Reservation.ReservationId).Distinct().ToList(),
+                    OrderIds: group.Select(x => x.Reservation.OrderId).Distinct().ToList()
+                ))
+                .ToList();
+
+            return result;
+        }
+        catch (MongoException exception)
+        {
+            logger.LogError(
+                exception,
+                "MongoDB failed while retrieving expected reserved quantity by SKU and warehouse. ErrorCategory: {ErrorCategory}",
+                "TransientMongoError");
+
+            throw new InventoryStoreUnavailableException("Inventory store is unavailable while retrieving expected reserved quantity by SKU and warehouse", exception);
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿using InventoryService.Domain.Inventory;
+using InventoryService.Domain.Inventory;
 
 namespace InventoryService.Application.Inventory.Abstractions;
 
@@ -27,4 +27,10 @@ public interface IInventoryItemRepository
     /// <param name="inventoryItem">The inventory item to update.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task UpdateAsync(InventoryItem inventoryItem, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets a read-only point-in-time view of actual reserved quantities by SKU+warehouse.
+    /// Reconciliation uses this snapshot only for reporting drift; it must not mutate stock or acquire write locks.
+    /// </summary>
+    Task<IReadOnlyDictionary<(string Sku, string WarehouseId), int>> GetReservedQuantitySnapshotAsync(CancellationToken cancellationToken = default);
 }
