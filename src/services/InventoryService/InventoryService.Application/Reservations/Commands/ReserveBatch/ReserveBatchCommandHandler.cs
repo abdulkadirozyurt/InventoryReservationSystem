@@ -51,14 +51,14 @@ public sealed class ReserveBatchCommandHandler(
         // Collapse duplicate SKU + warehouse lines before locking and stock checks.
         var requestedItems = AggregateRequestedItems(command.Items);
 
-        // Create lock keys for each unique SKU + warehouse combination.
-        var inventoryStockLockKeys = CreateInventoryStockLockKeys(requestedItems);
+        // Aynı order farklı ürünlerle tekrar gelse bile order lock ikinci işlemi bekletir.
+        var reservationLockKeys = CreateReservationLockKeys(command.OrderId, requestedItems);
 
         try
         {
             // Acquire distributed locks for all requested SKU + warehouse combinations.
             await using var lockHandle = await distributedLockService.AcquireAsync(
-                inventoryStockLockKeys,
+                reservationLockKeys,
                 LockExpiry,
                 LockWaitTimeout,
                 cancellationToken);
@@ -69,10 +69,45 @@ public sealed class ReserveBatchCommandHandler(
             var stockFailures = new List<ReserveBatchFailure>();
 
             var reservationId = Guid.CreateVersion7().ToString("N");
+            var replayedReservationId = string.Empty;
 
             // Read every stock row before allowing the batch to continue.
             await unitOfWork.ExecuteInTransactionAsync(async token =>
             {
+                var existingReservation = await reservationRepository.GetByOrderIdAsync(command.OrderId, token);
+
+                if (existingReservation is not null)
+                {
+                    if (!HasSameReservationItems(existingReservation, requestedItems))
+                    {
+                        stockFailures.Add(new ReserveBatchFailure(
+                            string.Empty,
+                            string.Empty,
+                            "RESERVATION_CONFLICT",
+                            "Order already has a reservation with different items."));
+
+                        logger.LogWarning(
+                            "Reserve batch rejected because order already has a different reservation. OrderId: {OrderId}, ReservationId: {ReservationId}, CorrelationId: {CorrelationId}, ErrorClass: {ErrorClass}",
+                            command.OrderId,
+                            existingReservation.ReservationId,
+                            command.CorrelationId,
+                            InventoryErrorClass.Business);
+
+                        return;
+                    }
+
+                    // Aynı order aynı payload ile tekrar geldiyse stok tekrar düşmez, eski reservation döner.
+                    replayedReservationId = existingReservation.ReservationId;
+
+                    logger.LogInformation(
+                        "Reserve batch replay returned existing reservation. OrderId: {OrderId}, ReservationId: {ReservationId}, CorrelationId: {CorrelationId}",
+                        command.OrderId,
+                        existingReservation.ReservationId,
+                        command.CorrelationId);
+
+                    return;
+                }
+
                 foreach (var requestedItem in requestedItems)
                 {
                     // find stock for the requested SKU and warehouse
@@ -102,6 +137,15 @@ public sealed class ReserveBatchCommandHandler(
 
             }, cancellationToken);
 
+            if (!string.IsNullOrWhiteSpace(replayedReservationId))
+            {
+                var replayDuration = Stopwatch.GetElapsedTime(startedAt);
+                metrics.RecordReservationOperation(OperationName, "success", replayDuration);
+                metrics.RecordTimeToReserve(replayDuration);
+
+                return new ReserveBatchResult(true, replayedReservationId, []);
+            }
+
             // If there are any stock failures, return them without making any reservations.
             if (stockFailures.Count > 0)
             {
@@ -124,7 +168,7 @@ public sealed class ReserveBatchCommandHandler(
                 exception,
                 "Reserve batch lock acquisition timed out. CorrelationId: {CorrelationId}, LockKeyCount: {LockKeyCount}, ErrorClass: {ErrorClass}",
                 command.CorrelationId,
-                inventoryStockLockKeys.Count,
+                reservationLockKeys.Count,
                 InventoryErrorClass.Timeout
             );
 
@@ -254,13 +298,37 @@ public sealed class ReserveBatchCommandHandler(
         return failures;
     }
 
-    private static IReadOnlyCollection<string> CreateInventoryStockLockKeys(IEnumerable<ReserveBatchItemCommand> requestedItems)
+    private static IReadOnlyCollection<string> CreateReservationLockKeys(
+        string orderId,
+        IEnumerable<ReserveBatchItemCommand> requestedItems)
     {
+        // Order lock, aynı order farklı SKU listeleriyle gelse bile iki işlemin paralel çalışmasını engeller.
         return requestedItems
             .Select(requestedItem => $"inventory:{requestedItem.Sku}:{requestedItem.WarehouseId}")
+            .Append($"reservation-order:{orderId}")
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private static bool HasSameReservationItems(
+        Reservation reservation,
+        IReadOnlyCollection<ReserveBatchItemCommand> requestedItems)
+    {
+        // Listeleri aynı sıraya getirerek SKU, depo ve miktarların gerçekten aynı olduğunu kontrol ediyoruz.
+        var existingItems = reservation.Items
+            .Select(item => (item.Sku, item.WarehouseId, item.Quantity))
+            .OrderBy(item => item.Sku, StringComparer.Ordinal)
+            .ThenBy(item => item.WarehouseId, StringComparer.Ordinal)
+            .ToArray();
+
+        var newItems = requestedItems
+            .Select(item => (item.Sku, item.WarehouseId, item.Quantity))
+            .OrderBy(item => item.Sku, StringComparer.Ordinal)
+            .ThenBy(item => item.WarehouseId, StringComparer.Ordinal)
+            .ToArray();
+
+        return existingItems.SequenceEqual(newItems);
     }
 
     private static ReserveBatchItemCommand[] AggregateRequestedItems(IEnumerable<ReserveBatchItemCommand> items)
