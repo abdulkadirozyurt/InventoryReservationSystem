@@ -74,10 +74,10 @@ flowchart TD
 - **Structured Serilog Logging**: Technical logging with named property templates (no string interpolation) written to both the Console and a dedicated MongoDB `ApplicationLogs` collection.
 - **OpenTelemetry Metrics & Health Infrastructure**: Integration with .NET Aspire ServiceDefaults, exposing `/health` (liveness) and `/health/ready` (readiness) endpoints mapped to Mongo and Redis states. InventoryService emits low-cardinality metrics for Redis lock acquisition/ownership, TTL exceeded detection, reservation operation duration/failures, time-to-reserve, time-to-confirmation, and operational stock adjustments.
 - **Order Persistence & Lifecycle Endpoints**: OrderService persists created orders and `OrderHistory`, lists/reads orders from MongoDB, and confirms/cancels orders by calling InventoryService through Application-layer use cases.
+- **Redis-Based Create-Order Idempotency**: `POST /api/orders` requires a client-generated `Idempotency-Key`. Redis atomically claims the first request, caches the completed HTTP response, replays same-key/same-body retries without MongoDB or gRPC work, rejects same-key/different-body conflicts, and briefly waits for concurrent duplicates to finish.
 
 ### Planned Features (Roadmap)
 - **Automatic Expiration Engine**: A background worker that periodically scans for expired `Pending` reservations (10-minute TTL) and releases them, utilizing a MongoDB checkpoint system to resume safely after crashes.
-- **Redis-Based Idempotency Layer**: Adding `Idempotency-Key` checking on the REST endpoints to prevent duplicate order submissions.
 - **Polly gRPC Resilience**: Implementing retry, timeout, and circuit breaker policies on the gRPC client side.
 - **Advanced Inventory Workflows**: Multi-warehouse fallback, automated warehouse rebalancing, low-stock alerts, and snapshot/restore utilities.
 
@@ -206,6 +206,7 @@ Submit a batch of items to reserve inventory.
 - **Endpoint**: `POST /api/orders`
 - **Headers**:
   - `Content-Type: application/json`
+  - `Idempotency-Key: <client-generated-unique-value>` (Required; reuse the same value only when retrying the same logical request)
   - `X-Correlation-ID: <unique-guid>` (Optional)
 - **Request Body**:
   ```json
@@ -229,6 +230,7 @@ Submit a batch of items to reserve inventory.
   ```bash
   curl -X POST http://localhost:5041/api/orders \
     -H "Content-Type: application/json" \
+    -H "Idempotency-Key: create-order-019f41d43b7176ef9d93820423e24268" \
     -d '{"items":[{"sku":"SKU-001","warehouseId":"WH-001","quantity":5},{"sku":"SKU-002","warehouseId":"WH-001","quantity":2}]}'
   ```
 
@@ -280,7 +282,6 @@ During the development of this prototype, several key distributed architecture i
 
 ## Known Limitations
 
-- **No Order Storage**: `OrderService` does not have a database and does not persist orders. It functions purely as a gRPC client gateway.
 - **No Automatic Cleanup**: The background worker that expires `Pending` reservations after 10 minutes is defined in the roadmap but has not yet been built. Currently, reservations do not expire automatically.
 - **Placeholder Methods**: The advanced operational gRPC operations for rebalancing warehouses and creating/restoring snapshots are currently stubs that return successful response placeholders.
 - **No Tests**: Automated tests are missing and will be introduced in the final roadmap phases.

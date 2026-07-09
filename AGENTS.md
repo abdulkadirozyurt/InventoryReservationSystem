@@ -172,7 +172,7 @@ Update this file when a service boundary, communication pattern, or structural c
   - Order Confirmation endpoint'i, order `Confirmed` yapılmadan önce InventoryService üzerinde `ConfirmReservation(reservationId)` çağıracak.
   - Cancel Order ve Bulk Cancel endpoint'leri her order'ın `reservationId` değeri için `ReleaseBatch` çağıracak; bulk cancel tek HTTP isteği olsa bile InventoryService tarafında release işlemi rezervasyon bazında idempotent kalacak.
   - Create, cancel, bulk cancel, confirm ve get/list endpointlerinde request başlangıç/bitiş, hata, correlation id ve dış gRPC çağrı sonucu technical log olarak yazılacak.
-- [ ] **Adım 4.3: Redis Tabanlı İdempotency Katmanı**
+- [X] **Adım 4.3: Redis Tabanlı İdempotency Katmanı**
   - Create Order endpoint'ine gelen isteklerin `Idempotency-Key` başlığı Redis üzerinde kontrol edilecek.
   - Aynı isteğin **her tekrarında** (tekrar sayısı sınırsız — 5 kez, 50 kez fark etmez), veritabanına veya gRPC'ye tekrar gitmeden hafızadaki aynı sonuç doğrudan dönülecek. ("5 keze kadar" gibi bir üst sınır yok; idempotency garantisi tekrar sayısından bağımsız olacak.)
   - Idempotency hit/miss, replay response, key conflict, Redis timeout ve cache write/read failure durumları correlation id ile loglanacak.

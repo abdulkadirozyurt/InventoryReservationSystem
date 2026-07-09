@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using OrderService.Application.Orders.Abstractions;
 using OrderService.Application.Orders.Commands.BulkCancelOrders;
 using OrderService.Application.Orders.Commands.CancelOrder;
@@ -8,6 +10,7 @@ using OrderService.Application.Orders.Queries.GetOrder;
 using OrderService.Application.Orders.Queries.ListOrders;
 using OrderService.Application.Orders.Results;
 using OrderService.Domain.Orders;
+using OrderService.Infrastructure.Idempotency;
 
 namespace OrderService.API.Endpoints;
 
@@ -38,8 +41,17 @@ public static class OrderEndpoints
         return app;
     }
 
-    private static async Task<IResult> CreateOrderAsync(IIdempotencyStore idempotencyStore, CreateOrderRequest request, CreateOrderCommandHandler handler, HttpContext context, CancellationToken cancellationToken)
+    private static async Task<IResult> CreateOrderAsync(
+        CreateOrderRequest request,
+        CreateOrderCommandHandler handler,
+        IIdempotencyStore idempotencyStore,
+        IdempotencyOptions idempotencyOptions,
+        ILoggerFactory loggerFactory,
+        HttpContext context,
+        CancellationToken cancellationToken)
     {
+        var logger = loggerFactory.CreateLogger("OrderService.API.Endpoints.CreateOrder");
+        var correlationId = GetCorrelationId(context);
         var idempotencyKey = context.Request.Headers["Idempotency-Key"].ToString();
         if (string.IsNullOrWhiteSpace(idempotencyKey))
             return Results.BadRequest(new
@@ -59,8 +71,17 @@ public static class OrderEndpoints
             cancellationToken);
 
         #region IdempotencyKeyClaimCheck
-        if (claim.Status == IdempotencyClaimStatus.Replay && claim.CompletedResult is not null)
+
+        if (claim.Status == IdempotencyClaimStatus.Replay &&
+            claim.CompletedResult is not null)
         {
+            // Aynı istek daha önce tamamlanmış. Handler'a, MongoDB'ye veya gRPC'ye gitmeden
+            // Redis'te tuttuğumuz eski HTTP cevabını geri dönüyoruz.
+            logger.LogInformation(
+                "Idempotency replay for key {IdempotencyKey} and correlation id {CorrelationId}",
+                idempotencyKey,
+                correlationId);
+
             return Results.Text(
                 claim.CompletedResult.ResponseBody,
                 claim.CompletedResult.ContentType,
@@ -69,6 +90,13 @@ public static class OrderEndpoints
 
         if (claim.Status == IdempotencyClaimStatus.Conflict)
         {
+            // Aynı key daha önce kullanılmış ama request body farklı.
+            // Bu durumda eski cevabı dönmek yanlış olacağı için isteği reddediyoruz.
+            logger.LogWarning(
+                "Idempotency key conflict for key {IdempotencyKey} and correlation id {CorrelationId}",
+                idempotencyKey,
+                correlationId);
+
             return Results.Conflict(new
             {
                 ErrorCode = "IdempotencyKeyConflict",
@@ -78,6 +106,41 @@ public static class OrderEndpoints
 
         if (claim.Status == IdempotencyClaimStatus.Processing)
         {
+            // Aynı key ile ilk istek hâlâ çalışıyor olabilir.
+            // Hemen hata dönmek yerine kısa süre bekleyip Redis'teki sonucu kontrol ediyoruz.
+            var waitStartedAt = DateTimeOffset.UtcNow;
+
+            while (DateTimeOffset.UtcNow - waitStartedAt < idempotencyOptions.ReplayWaitTimeout)
+            {
+                await Task.Delay(
+                    idempotencyOptions.ReplayPollInterval,
+                    cancellationToken);
+
+                var completedResult = await idempotencyStore.TryGetCompleteAsync(
+                    idempotencyKey,
+                    cancellationToken);
+
+                if (completedResult is null)
+                    continue;
+
+                logger.LogInformation(
+                    "Idempotency replay completed after waiting for key {IdempotencyKey} and correlation id {CorrelationId}",
+                    idempotencyKey,
+                    correlationId);
+
+                return Results.Text(
+                    completedResult.ResponseBody,
+                    completedResult.ContentType,
+                    statusCode: completedResult.StatusCode);
+            }
+
+            // Bekleme süresinde ilk istek tamamlanmadı.
+            // İkinci order oluşturmuyoruz; client aynı key ile tekrar deneyebilir.
+            logger.LogInformation(
+                "Idempotency request is still processing after wait timeout for key {IdempotencyKey} and correlation id {CorrelationId}",
+                idempotencyKey,
+                correlationId);
+
             return Results.Conflict(new
             {
                 ErrorCode = "IdempotencyKeyProcessing",
@@ -87,12 +150,26 @@ public static class OrderEndpoints
 
         if (claim.Status == IdempotencyClaimStatus.StoreUnavailable)
         {
+            // Redis çalışmıyorsa idempotency garantisi veremeyiz.
+            // Duplicate order riskine girmemek için create-order işlemini başlatmıyoruz.
+            logger.LogError(
+                "Idempotency store unavailable for key {IdempotencyKey} and correlation id {CorrelationId}",
+                idempotencyKey,
+                correlationId);
+
             return Results.Problem(
                 statusCode: StatusCodes.Status503ServiceUnavailable,
                 title: "Idempotency store is unavailable.");
         }
-        #endregion
 
+        // Buraya yalnızca Claimed durumunda geliriz.
+        // Yani bu key ilk kez alındı ve create-order işlemini çalıştırabiliriz.
+        logger.LogInformation(
+            "Idempotency key claimed for key {IdempotencyKey} and correlation id {CorrelationId}",
+            idempotencyKey,
+            correlationId);
+
+        #endregion
 
         var command = new CreateOrderCommand(
             request.Items.Select(item => new CreateOrderItemCommand(item.Sku, item.WarehouseId, item.Quantity)).ToArray(),
@@ -100,7 +177,7 @@ public static class OrderEndpoints
 
         var result = await handler.HandleAsync(command, cancellationToken);
 
-        return Results.Ok(new CreateOrderResponse(
+        var responseBody = new CreateOrderResponse(
             result.Success,
             result.OrderNumber,
             result.ReservationId ?? string.Empty,
@@ -108,7 +185,34 @@ public static class OrderEndpoints
                 failure.Sku,
                 failure.WarehouseId,
                 failure.ErrorCode,
-                failure.Reason)).ToArray()));
+                failure.Reason)).ToArray());
+
+        var statusCode = result.Success
+            ? StatusCodes.Status201Created
+            : StatusCodes.Status409Conflict;
+
+        // İşlem bitti. Aynı key tekrar gelirse MongoDB ve gRPC tekrar çalışmasın diye
+        // verdiğimiz HTTP cevabını Redis'e kaydediyoruz.
+        var serializedResponse = JsonSerializer.Serialize(
+            responseBody,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        await idempotencyStore.CompleteAsync(
+            idempotencyKey,
+            requestHash,
+            statusCode,
+            serializedResponse,
+            "application/json",
+            cancellationToken);
+
+        logger.LogInformation(
+            "Idempotency response cached for key {IdempotencyKey}, order {OrderNumber}, correlation id {CorrelationId} and status {StatusCode}",
+            idempotencyKey,
+            result.OrderNumber,
+            correlationId,
+            statusCode);
+
+        return Results.Json(responseBody, statusCode: statusCode);
     }
 
     private static async Task<IResult> GetOrderAsync(string orderNumber, GetOrderQueryHandler handler, CancellationToken cancellationToken)
