@@ -1,10 +1,12 @@
 using InventoryReservationSystem.Contracts.Inventory;
 using OrderService.Application.Orders.Abstractions;
+using OrderService.Infrastructure.InventoryGrpc;
 
 namespace OrderService.Infrastructure.Services;
 
 public sealed class InventoryReservationService(
-    InventoryReservations.InventoryReservationsClient client) : IInventoryReservationService
+    InventoryReservations.InventoryReservationsClient client,
+    InventoryGrpcResilienceExecutor resilienceExecutor) : IInventoryReservationService
 {
     public async Task<InventoryReservationResult> ReserveBatchAsync(
         string orderId,
@@ -25,7 +27,10 @@ public sealed class InventoryReservationService(
             Quantity = item.Quantity
         }));
 
-        var response = await client.ReserveBatchAsync(request, cancellationToken: cancellationToken);
+        // Bu çağrı InventoryService'e gider. Geçici gRPC hatalarında Polly retry/circuit breaker devreye girer.
+        var response = await ExecuteWithResiliencePipeline(
+            token => client.ReserveBatchAsync(request, cancellationToken: token).ResponseAsync,
+            cancellationToken);
 
         return new InventoryReservationResult(
             response.Success,
@@ -56,7 +61,10 @@ public sealed class InventoryReservationService(
             Quantity = item.Quantity
         }));
 
-        var response = await client.ReleaseBatchAsync(request, cancellationToken: cancellationToken);
+        // Release işlemi de geçici servis ve ağ hatalarına karşı aynı ortak pipeline'ı kullanır.
+        var response = await ExecuteWithResiliencePipeline(
+            token => client.ReleaseBatchAsync(request, cancellationToken: token).ResponseAsync,
+            cancellationToken);
         return new InventoryReservationOperationResult(response.Success, response.ErrorCode, response.ErrorMessage);
     }
 
@@ -71,7 +79,19 @@ public sealed class InventoryReservationService(
             ReservationId = reservationId
         };
 
-        var response = await client.ConfirmReservationAsync(request, cancellationToken: cancellationToken);
+        // Confirm çağrısı başarısız olduğunda transient hatalar ortak pipeline tarafından yönetilir.
+        var response = await ExecuteWithResiliencePipeline(
+            token => client.ConfirmReservationAsync(request, cancellationToken: token).ResponseAsync,
+            cancellationToken);
         return new InventoryReservationOperationResult(response.Success, response.ErrorCode, response.ErrorMessage);
+    }
+
+    private async Task<TResponse> ExecuteWithResiliencePipeline<TResponse>(
+        Func<CancellationToken, Task<TResponse>> operation,
+        CancellationToken cancellationToken = default)
+    {
+        return await resilienceExecutor.ExecuteAsync(
+            token => operation(token),
+            cancellationToken);
     }
 }

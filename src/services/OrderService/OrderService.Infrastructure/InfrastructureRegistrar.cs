@@ -10,6 +10,7 @@ using OrderService.Infrastructure.Mongo;
 using OrderService.Infrastructure.Repositories.Orders;
 using OrderService.Infrastructure.Services;
 using OrderService.Infrastructure.Idempotency;
+using OrderService.Infrastructure.InventoryGrpc;
 using StackExchange.Redis;
 
 namespace OrderService.Infrastructure;
@@ -74,7 +75,12 @@ public static class InfrastructureRegistrar
 
         services.AddScoped<IIdempotencyStore, RedisIdempotencyStore>();
 
+        // Bu executor singleton kalır. Böylece circuit breaker durumu her HTTP isteğinde sıfırlanmaz.
+        services.Configure<InventoryGrpcResilienceOptions>(
+            configuration.GetSection(InventoryGrpcResilienceOptions.SectionName));
+        services.AddSingleton<InventoryGrpcResilienceExecutor>();
 
+        services.AddScoped<IInventoryReservationService, InventoryReservationService>();
 
         services.AddGrpcClient<InventoryReservations.InventoryReservationsClient>(options =>
         {
