@@ -170,7 +170,7 @@ Update this file when a service boundary, communication pattern, or structural c
   - Background job'un çökme/yeniden başlama durumlarında kaldığı yeri bilmesi için MongoDB üzerinde bir checkpoint (işaret noktası) mekanizması kurulacak.
   - Checkpoint kaydı scan cursor/zaman damgası ve son işlenen `reservationId` bilgisini tutacak; restart sonrası duplicate release üretmeden devam edilecek.
   - Checkpoint okuma/yazma, restart sonrası kaldığı yerden devam etme ve duplicate release engelleme kararları technical log olarak yazılacak.
-- [ ] **Adım 5.3: Dead Letter Queue (DLQ) Entegrasyonu**
+- [x] **Adım 5.3: Dead Letter Queue (DLQ) Entegrasyonu**
   - Süre aşımı (expiry) veya iptal esnasında temiz bir şekilde serbest bırakılamayan, hata alan "yetim" sipariş/rezervasyon kayıtları manuel inceleme için Dead Letter yapısına taşınacak.
   - Tech stack içinde ayrı broker bulunmadığı için DLQ ilk aşamada MongoDB koleksiyonu veya gerekirse Redis listesi olarak tasarlanacak.
   - DLQ'ya taşınan her kayıt sebep, correlation id, reservation/order id ve hata kategorisiyle loglanacak.

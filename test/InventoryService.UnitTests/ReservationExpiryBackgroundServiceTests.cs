@@ -57,7 +57,8 @@ public sealed class ReservationExpiryBackgroundServiceTests
             _inventoryUnitOfWork,
             _distributedLockService,
             _metrics,
-            Substitute.For<ILogger<ReleaseBatchCommandHandler>>()
+            Substitute.For<ILogger<ReleaseBatchCommandHandler>>(),
+            _dlqRepository
         );
 
         _options = Options.Create(new ExpiryWorkerOptions

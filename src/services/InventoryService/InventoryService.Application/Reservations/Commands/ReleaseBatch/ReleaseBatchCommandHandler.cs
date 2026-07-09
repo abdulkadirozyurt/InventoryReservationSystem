@@ -1,10 +1,12 @@
 using System.Diagnostics;
+using System.Text.Json;
 using InventoryService.Application.Inventory.Abstractions;
 using InventoryService.Application.Inventory.Exceptions;
 using InventoryService.Application.Observability;
 using InventoryService.Application.Observability.Abstractions;
 using InventoryService.Application.Reservations.Abstractions;
 using InventoryService.Application.Reservations.Results.Release;
+using InventoryService.Domain.DeadLetterQueue;
 using InventoryService.Domain.InventoryTransactions;
 using InventoryService.Domain.Reservations;
 using Microsoft.Extensions.Logging;
@@ -20,7 +22,8 @@ public sealed class ReleaseBatchCommandHandler(
     IInventoryUnitOfWork inventoryUnitOfWork,
     IDistributedLockService distributedLockService,
     IInventoryServiceMetrics metrics,
-    ILogger<ReleaseBatchCommandHandler> logger)
+    ILogger<ReleaseBatchCommandHandler> logger,
+    IDeadLetterQueueRepository deadLetterQueueRepository)
 {
     // Response error code'ları API contract'a sabit ve aranabilir hata döndürmek için tutulur.
     private const string OperationName = "release_batch";
@@ -57,8 +60,15 @@ public sealed class ReleaseBatchCommandHandler(
                 ValidationFailure,
                 InventoryErrorClass.Validation);
 
+            if (!command.IsExpiry)
+            {
+                await UpsertDlqAsync(command, null, ValidationFailure, "Release batch validation failed.", cancellationToken);
+            }
+
             return validationResult;
         }
+
+        string? orderId = null;
 
         try
         {
@@ -77,8 +87,15 @@ public sealed class ReleaseBatchCommandHandler(
                     ReservationNotFound,
                     InventoryErrorClass.Business);
 
+                if (!command.IsExpiry)
+                {
+                    await UpsertDlqAsync(command, null, ReservationNotFound, "Reservation not found.", cancellationToken);
+                }
+
                 return new ReleaseBatchResult(false, ReservationNotFound, "Reservation not found.");
             }
+
+            orderId = reservation.OrderId;
 
             // Release idempotent olmalı; aynı rezervasyon ikinci kez stok değiştirmemeli.
             if (reservation.Status is ReservationStatus.Released or ReservationStatus.Expired)
@@ -108,6 +125,11 @@ public sealed class ReleaseBatchCommandHandler(
                     InvalidReservationState,
                     InventoryErrorClass.Business);
 
+                if (!command.IsExpiry)
+                {
+                    await UpsertDlqAsync(command, orderId, InvalidReservationState, "Reservation must be pending to release.", cancellationToken);
+                }
+
                 return new ReleaseBatchResult(false, InvalidReservationState, "Reservation must be pending to release.");
             }
 
@@ -122,6 +144,11 @@ public sealed class ReleaseBatchCommandHandler(
                     command.ReservationId,
                     ItemMismatch,
                     InventoryErrorClass.Business);
+
+                if (!command.IsExpiry)
+                {
+                    await UpsertDlqAsync(command, orderId, ItemMismatch, "Request items do not match reservation items.", cancellationToken);
+                }
 
                 return new ReleaseBatchResult(false, ItemMismatch, "Request items do not match reservation items.");
             }
@@ -252,6 +279,12 @@ public sealed class ReleaseBatchCommandHandler(
             // Defensive fallback: callback hiç sonuç yazmazsa belirsiz başarı dönmeyelim.
             var result = transactionResult ?? new ReleaseBatchResult(false, SystemError, "Release batch failed due to an unexpected transaction result.");
             RecordResult(result, startedAt);
+
+            if (!result.Success && !command.IsExpiry)
+            {
+                await UpsertDlqAsync(command, orderId, result.ErrorCode ?? SystemError, result.ErrorMessage ?? "Release batch transaction failed.", cancellationToken);
+            }
+
             return result;
         }
         catch (TimeoutException exception)
@@ -266,6 +299,11 @@ public sealed class ReleaseBatchCommandHandler(
                 command.ReservationId,
                 LockTimeout,
                 InventoryErrorClass.Timeout);
+
+            if (!command.IsExpiry)
+            {
+                await UpsertDlqAsync(command, orderId, LockTimeout, "Timed out while waiting for inventory locks.", cancellationToken);
+            }
 
             return new ReleaseBatchResult(false, LockTimeout, "Timed out while waiting for inventory locks.");
         }
@@ -293,6 +331,11 @@ public sealed class ReleaseBatchCommandHandler(
                 "TransientMongoError",
                 InventoryErrorClass.Transient);
 
+            if (!command.IsExpiry)
+            {
+                await UpsertDlqAsync(command, orderId, InventoryStoreUnavailable, "Release batch failed due to inventory store unavailability.", cancellationToken);
+            }
+
             return new ReleaseBatchResult(false, InventoryStoreUnavailable, "Inventory store is unavailable.");
         }
         catch (Exception exception)
@@ -308,7 +351,44 @@ public sealed class ReleaseBatchCommandHandler(
                 "UnexpectedSystemError",
                 InventoryErrorClass.System);
 
+            if (!command.IsExpiry)
+            {
+                await UpsertDlqAsync(command, orderId, SystemError, "Release batch failed due to an unexpected system error.", cancellationToken);
+            }
+
             return new ReleaseBatchResult(false, SystemError, "Release batch failed due to an unexpected system error.");
+        }
+    }
+
+    private async Task UpsertDlqAsync(
+        ReleaseBatchCommand command,
+        string? orderId,
+        string errorCode,
+        string errorMessage,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var payloadJson = JsonSerializer.Serialize(command);
+            var dlqRecord = new DeadLetterRecord(
+                operationType: "CancelRelease",
+                reason: errorMessage,
+                errorCategory: errorCode,
+                correlationId: command.CorrelationId,
+                reservationId: command.ReservationId,
+                orderId: orderId,
+                retryCount: 0,
+                payloadSnapshot: payloadJson);
+
+            await deadLetterQueueRepository.UpsertFailureAsync(dlqRecord, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "Failed to write CancelRelease to DLQ database in ReleaseBatchCommandHandler. CorrelationId: {CorrelationId}, ReservationId: {ReservationId}",
+                command.CorrelationId,
+                command.ReservationId);
         }
     }
 
