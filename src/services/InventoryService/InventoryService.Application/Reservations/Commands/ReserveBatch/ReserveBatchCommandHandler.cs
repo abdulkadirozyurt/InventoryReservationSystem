@@ -51,7 +51,9 @@ public sealed class ReserveBatchCommandHandler(
         // Collapse duplicate SKU + warehouse lines before locking and stock checks.
         var requestedItems = AggregateRequestedItems(command.Items);
 
-        // Aynı order farklı ürünlerle tekrar gelse bile order lock ikinci işlemi bekletir.
+        // Stock lock'ları aynı SKU üzerindeki paralel değişiklikleri sıraya koyar.
+        // Order lock ise aynı OrderId farklı SKU listeleriyle tekrar gelse bile ikinci isteği bekletir.
+        // Böylece idempotency kontrolü yapılırken iki istek aynı anda stok değiştiremez.
         var reservationLockKeys = CreateReservationLockKeys(command.OrderId, requestedItems);
 
         try
@@ -96,7 +98,9 @@ public sealed class ReserveBatchCommandHandler(
                         return;
                     }
 
-                    // Aynı order aynı payload ile tekrar geldiyse stok tekrar düşmez, eski reservation döner.
+                    // Bu OrderId daha önce aynı SKU, depo ve miktarlarla işlendi.
+                    // İsteği yeniden çalıştırmak stok miktarını ikinci kez düşürürdü.
+                    // Bunun yerine ilk işlemde oluşturulan ReservationId'yi aynen geri döndürüyoruz.
                     replayedReservationId = existingReservation.ReservationId;
 
                     logger.LogInformation(
@@ -192,6 +196,50 @@ public sealed class ReserveBatchCommandHandler(
                 command.CorrelationId);
 
             throw;
+        }
+        catch (DuplicateReservationException exception)
+        {
+            // Çok nadir durumda order lock süresi dolabilir veya iki servis instance'ı aynı anda ilerleyebilir.
+            // MongoDB unique orderId index'i bu durumda yalnızca bir reservation kaydının commit edilmesine izin verir.
+            // Duplicate alan transaction tamamen rollback olur; stok ve audit değişiklikleri de geri alınır.
+            // Sonra commit edilen reservation'ı transaction dışında okuyup güvenli replay sonucu olarak döndürüyoruz.
+            var existingReservation = await reservationRepository.GetByOrderIdAsync(
+                command.OrderId,
+                cancellationToken);
+
+            if (existingReservation is not null && HasSameReservationItems(existingReservation, requestedItems))
+            {
+                var duration = Stopwatch.GetElapsedTime(startedAt);
+                metrics.RecordReservationOperation(OperationName, "success", duration);
+                metrics.RecordTimeToReserve(duration);
+
+                logger.LogInformation(
+                    "Reserve batch duplicate race returned existing reservation. OrderId: {OrderId}, ReservationId: {ReservationId}, CorrelationId: {CorrelationId}",
+                    command.OrderId,
+                    existingReservation.ReservationId,
+                    command.CorrelationId);
+
+                return new ReserveBatchResult(true, existingReservation.ReservationId, []);
+            }
+
+            logger.LogWarning(
+                exception,
+                "Reserve batch duplicate race found a conflicting reservation. OrderId: {OrderId}, CorrelationId: {CorrelationId}, ErrorClass: {ErrorClass}",
+                command.OrderId,
+                command.CorrelationId,
+                InventoryErrorClass.Business);
+
+            metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordReservationFailure(OperationName, "RESERVATION_CONFLICT", InventoryErrorClass.Business);
+
+            return new ReserveBatchResult(
+                false,
+                null,
+                [new ReserveBatchFailure(
+                    string.Empty,
+                    string.Empty,
+                    "RESERVATION_CONFLICT",
+                    "Order already has a reservation with different items.")]);
         }
         catch (InventoryStoreUnavailableException exception)
         {
@@ -302,7 +350,8 @@ public sealed class ReserveBatchCommandHandler(
         string orderId,
         IEnumerable<ReserveBatchItemCommand> requestedItems)
     {
-        // Order lock, aynı order farklı SKU listeleriyle gelse bile iki işlemin paralel çalışmasını engeller.
+        // Her ürün için inventory lock anahtarı, ayrıca istek için order lock anahtarı oluşturuyoruz.
+        // Tüm anahtarları alfabetik sıralamak farklı isteklerin lock'ları farklı sırada alıp deadlock oluşturmasını engeller.
         return requestedItems
             .Select(requestedItem => $"inventory:{requestedItem.Sku}:{requestedItem.WarehouseId}")
             .Append($"reservation-order:{orderId}")
@@ -315,7 +364,9 @@ public sealed class ReserveBatchCommandHandler(
         Reservation reservation,
         IReadOnlyCollection<ReserveBatchItemCommand> requestedItems)
     {
-        // Listeleri aynı sıraya getirerek SKU, depo ve miktarların gerçekten aynı olduğunu kontrol ediyoruz.
+        // Mongo'daki reservation item'larıyla yeni isteği aynı sıraya getiriyoruz.
+        // SKU, WarehouseId veya Quantity değerlerinden biri bile farklıysa bunu retry değil conflict kabul ediyoruz.
+        // Böylece aynı OrderId kullanılarak farklı bir rezervasyon oluşturulamaz.
         var existingItems = reservation.Items
             .Select(item => (item.Sku, item.WarehouseId, item.Quantity))
             .OrderBy(item => item.Sku, StringComparer.Ordinal)

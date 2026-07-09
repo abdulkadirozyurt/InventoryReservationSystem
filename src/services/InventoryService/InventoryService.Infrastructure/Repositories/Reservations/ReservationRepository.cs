@@ -29,6 +29,22 @@ public sealed class ReservationRepository(
 
             await _collection.InsertOneAsync(reservation, cancellationToken: cancellationToken);
         }
+        catch (MongoWriteException exception) when (exception.WriteError.Category == ServerErrorCategory.DuplicateKey)
+        {
+            // MongoDB'deki unique orderId index'i aynı order için ikinci reservation kaydına izin vermez.
+            // Bu hata database arızası değildir; iki paralel isteğin aynı order'ı kaydetmeye çalıştığını gösterir.
+            // Özel exception fırlatarak handler'ın transaction rollback sonrası mevcut reservation'ı döndürmesini sağlıyoruz.
+            logger.LogWarning(
+                exception,
+                "MongoDB rejected a duplicate reservation. ReservationId: {ReservationId}, OrderId: {OrderId}, ErrorCategory: {ErrorCategory}",
+                reservation.ReservationId,
+                reservation.OrderId,
+                "DuplicateReservation");
+
+            throw new DuplicateReservationException(
+                "A reservation already exists for this order",
+                exception);
+        }
         catch (MongoException exception)
         {
             logger.LogError(
