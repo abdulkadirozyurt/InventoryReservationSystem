@@ -158,31 +158,38 @@ Update this file when a service boundary, communication pattern, or structural c
 
 ## 🎯 3. Current Focus & Roadmap
 
-## FAZ 4: OrderService Sipariş Yönetimi ve Dirençli (Resilient) Entegrasyonlar
-*Hedef: Dış dünyaya açık kapıyı oluşturmak ve iç servis yavaşlıklarına karşı sistemi korumak.*
+## FAZ 5: Otomatik Süre Aşımı (Expiry) ve Gelişmiş Operasyonel Özellikler
+*Hedef: Sistemin kendi kendini temizlemesini sağlamak ve ileri düzey operasyonel gereksinimleri karşılamak.*
 
-- [X] **Adım 4.1: Sipariş Veri Modeli ve Tarihçe (MongoDB)**
-  - `Order` ve `OrderLineItem` (sku, requested quantity, reserved quantity, warehouseId) şemaları tasarlandı.
-  - Domain tarafında kafa karışıklığını önlemek için sipariş dış kimliği `OrderNumber`, InventoryService rezervasyon bağı ise `reservationId` olarak ayrıldı.
-  - OrderService MongoDB üzerinde `orders` ve `order-history` koleksiyonları collection validation ve indexlerle oluşturuluyor.
-  - Tüm durum geçişlerini (`Pending`, `Confirmed`, `Cancelled`, `Expired`) timestamp ile kaydeden `OrderHistory` audit trail modeli kuruldu.
-  - Order status değişimleri için timestamp, correlation id ve değişim nedeni alanları hazırlandı; endpoint business akışında kullanılması Adım 4.2 kapsamına bırakıldı.
-- [X] **Adım 4.2: Minimal API İskeletinin Kurulması**
-  - Create Order, Get Order, Cancel Order, Bulk Cancel (Tek istekte çoklu iptal), List Orders (Status ve tarih filtresiyle) ve Order Confirmation endpoint'leri boş fonksiyonlar olarak tanımlanacak.
-  - Order Confirmation endpoint'i, order `Confirmed` yapılmadan önce InventoryService üzerinde `ConfirmReservation(reservationId)` çağıracak.
-  - Cancel Order ve Bulk Cancel endpoint'leri her order'ın `reservationId` değeri için `ReleaseBatch` çağıracak; bulk cancel tek HTTP isteği olsa bile InventoryService tarafında release işlemi rezervasyon bazında idempotent kalacak.
-  - Create, cancel, bulk cancel, confirm ve get/list endpointlerinde request başlangıç/bitiş, hata, correlation id ve dış gRPC çağrı sonucu technical log olarak yazılacak.
-- [X] **Adım 4.3: Redis Tabanlı İdempotency Katmanı**
-  - Create Order endpoint'ine gelen isteklerin `Idempotency-Key` başlığı Redis üzerinde kontrol edilecek.
-  - Aynı isteğin **her tekrarında** (tekrar sayısı sınırsız — 5 kez, 50 kez fark etmez), veritabanına veya gRPC'ye tekrar gitmeden hafızadaki aynı sonuç doğrudan dönülecek. ("5 keze kadar" gibi bir üst sınır yok; idempotency garantisi tekrar sayısından bağımsız olacak.)
-  - Idempotency hit/miss, replay response, key conflict, Redis timeout ve cache write/read failure durumları correlation id ile loglanacak.
-- [X] **Adım 4.4: Polly ile gRPC İletişiminin Güvenli Hale Getirilmesi**
-  - OrderService, InventoryService'i ararken `ReserveBatch`, `ReleaseBatch`, `ConfirmReservation` ve mevcut operasyonel envanter çağrıları için ortak `InventoryGrpcResilienceExecutor` pipeline'ını kullanıyor.
-  - InventoryService tarafında global `GrpcExceptionInterceptor` etkin; `InventoryStoreUnavailableException`, `DuplicateReservationException`, `TimeoutException`, `ArgumentException` ve beklenmeyen hatalar safe gRPC status code'larına mapleniyor.
-  - OrderService tarafında dependency exception mapping merkezi `OrderServiceExceptionHandler` ile yapılıyor: circuit open ve unavailable -> 503, timeout/deadline/cancelled timeout -> 504, conflict -> 409, beklenmeyen downstream gRPC -> 502.
-  - Geçici hatalar için retry, yavaş çağrılar için per-attempt timeout, sürekli arızalar için circuit breaker aktif. Defaults: 3sn timeout, 3 retry, 200ms base delay, %50 failure ratio, 30sn sampling, 15sn break duration.
-  - Retry, timeout, circuit breaker ve idempotency claim release akışları structured log üretiyor; runtime doğrulamada claim release ve circuit-open fail-fast logları gözlendi.
-  - **Graceful Degradation davranışı doğrulandı:** InventoryService unavailable iken create-order 503 dönüyor ve Mongo'da Pending order oluşmuyor; InventoryService yavaş/paused iken 504 dönüyor; circuit breaker open durumunda fail-fast 503 dönüyor; transient failure sonrası Redis Processing claim atomic Lua script ile release ediliyor ve aynı Idempotency-Key başarılı şekilde retry edilebiliyor.
+- [ ] **Adım 5.1: Arka Plan Süre Aşımı Motoru (Background Job)**
+  - InventoryService içinde çalışan background job, OrderService veritabanını taramayacak; dahili `Reservations` koleksiyonunda `status = Pending` ve `expiresAt <= now` olan rezervasyonları tarayacak.
+  - Süresi dolan rezervasyonlar aynı `ReleaseBatch` semantiğiyle serbest bırakılacak: `quantityReserved` azaltılacak, `quantityAvailable` artırılacak.
+  - Başarılı expiry sonrası rezervasyon kaydı `Expired` durumuna geçirilecek ve transaction log'a `Release`/`Expired` bağlamı yazılacak.
+  - Expiry job scan başlangıç/bitiş, bulunan pending reservation sayısı, başarılı/başarısız release sonuçları, lock timeout ve transient hatalar loglanacak.
+- [ ] **Adım 5.2: Checkpoint Mekanizması**
+  - Background job'un çökme/yeniden başlama durumlarında kaldığı yeri bilmesi için MongoDB üzerinde bir checkpoint (işaret noktası) mekanizması kurulacak.
+  - Checkpoint kaydı scan cursor/zaman damgası ve son işlenen `reservationId` bilgisini tutacak; restart sonrası duplicate release üretmeden devam edilecek.
+  - Checkpoint okuma/yazma, restart sonrası kaldığı yerden devam etme ve duplicate release engelleme kararları technical log olarak yazılacak.
+- [ ] **Adım 5.3: Dead Letter Queue (DLQ) Entegrasyonu**
+  - Süre aşımı (expiry) veya iptal esnasında temiz bir şekilde serbest bırakılamayan, hata alan "yetim" sipariş/rezervasyon kayıtları manuel inceleme için Dead Letter yapısına taşınacak.
+  - Tech stack içinde ayrı broker bulunmadığı için DLQ ilk aşamada MongoDB koleksiyonu veya gerekirse Redis listesi olarak tasarlanacak.
+  - DLQ'ya taşınan her kayıt sebep, correlation id, reservation/order id ve hata kategorisiyle loglanacak.
+- [ ] **Adım 5.4: Envanter Mutabakat İşleyicisi (Inventory Reconciliation Job)**
+  - Belirli aralıklarla çalışıp beklenen sipariş/rezervasyon durumu ile gerçek envanter rezervasyon sayılarını (`quantityReserved`) karşılaştırıp tutarsızlıkları raporlayan bir job yazılacak.
+  - Bu job servis sahipliğini bozmayacak: Order verisini OrderService API/read model üzerinden, envanter ve rezervasyon verisini InventoryService API/gRPC/read model üzerinden alacak.
+  - OrderService, InventoryService'in MongoDB koleksiyonlarına; InventoryService de OrderService'in MongoDB koleksiyonlarına doğrudan erişmeyecek.
+  - Mutabakat farkları, beklenen/gerçek reserved miktarları ve reconciliation sonucu technical log/audit raporu olarak kaydedilecek.
+- [ ] **Adım 5.5: Gelişmiş Envanter Yönetimi Özellikleri**
+  - **Multi-Warehouse Fallback:** Rezervasyon esnasında ana depoda stok yoksa `warehouseId` bazlı alternatif depolara bakan fallback yapısı eklenecek; lock sırası SKU+depo anahtarları üzerinden deterministik kalacak.
+  - **Warehouse Rebalancing:** Depolar arası envanter transferini/dengelenmesini sağlayan API eklenecek (Adım 1.2'de öngörülen proto sözleşmesi kullanılacak) ve her transfer transaction log'a `Rebalance` olarak yazılacak.
+  - **Low-Stock Alert:** Stok miktarı belirlenen bir eşik değerinin (threshold) altına düştüğünde SKU+depo bazında log/alert üreten mekanizma kurulacak.
+  - **Snapshot & Restore:** Tüm envanter durumunun anlık yedeğini (snapshot) alan ve sistemi bu yedekten geri yükleyen (restore) fonksiyonlar eklenecek; restore kaynaklı düzeltmeler transaction log'a yazılacak.
+  - **Admin Override:** `Pending`, `Expired` veya stuck durumdaki sipariş/rezervasyonları el ile iptal etme, `AdjustStock` ile envanter hatalarını düzeltme ve düzeltme nedenini audit trail'e yazma yetkisi veren admin endpoint'leri yazılacak.
+  - Rebalance, snapshot restore ve admin override işlemleri `InventoryTransactions` audit trail içine reason, correlation id ve stok delta bilgisiyle yazılacak.
+  - Low-stock threshold altına düşen SKU+depo kayıtları alert/log sinyali üretecek.
+- [ ] **Adım 5.6: Temel Analitik Endpoint'i**
+  - Rezervasyon yoğunluğu, başarı/başarısızlık oranları ve ortalama sipariş tamamlanma (fulfillment) sürelerini hesaplayıp dönen bir analytics endpoint'i OrderService'e eklenecek.
+  - Analytics sorgularında hesaplanan zaman aralığı, filtreler, sonuç sayısı ve yavaş sorgu durumları technical log olarak yazılacak.
 
 ### Live Project State
 

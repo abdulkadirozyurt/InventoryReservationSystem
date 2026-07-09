@@ -16,7 +16,9 @@
     <Project Path="src/services/OrderService/OrderService.Domain/OrderService.Domain.csproj" />
     <Project Path="src/services/OrderService/OrderService.Infrastructure/OrderService.Infrastructure.csproj" />
   </Folder>
-  <Folder Name="/test/" />
+  <Folder Name="/test/">
+    <Project Path="test/InventoryService.UnitTests/InventoryService.UnitTests.csproj" />
+  </Folder>
   <Project Path="InventoryReservationSystem.AppHost/InventoryReservationSystem.AppHost.csproj" />
   <Project Path="InventoryReservationSystem.ServiceDefaults/InventoryReservationSystem.ServiceDefaults.csproj" />
 </Solution>
