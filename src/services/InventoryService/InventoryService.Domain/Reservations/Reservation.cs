@@ -1,42 +1,58 @@
 using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Bson.Serialization.Serializers;
 
 namespace InventoryService.Domain.Reservations;
 
 // temporary stock keeping record for an order
+// BsonClassMap.SetCreator ile Mongo driver parametresiz ctor kullanir; public ctor ise invariant korur (Id/OrderId bos olamaz, expiresAt future, en az 1 item).
 public sealed class Reservation
 {
+    // BsonClassMap.RegisterClassMap + SetCreator ile Mongo driver'in Reflection ile deserialize ettigi nesne garantili private ctor kullanir.
+    static Reservation()
+    {
+        if (!BsonClassMap.IsClassMapRegistered(typeof(Reservation)))
+        {
+            BsonClassMap.RegisterClassMap<Reservation>(classMap =>
+            {
+                classMap.AutoMap();
+                classMap.SetCreator(() => new Reservation());
+            });
+        }
+    }
+
+    // Sadece MongoDB deserialization icin. Public constructor invariant'lari korur, domain disindan cagrilmaz.
     private Reservation()
     {
     }
 
-    public Reservation(string reservationId, string orderId, List<ReservationItem> items, DateTime expiresAt)
+    public Reservation(string newReservationId, string newOrderId, List<ReservationItem> newItems, DateTime newExpiresAt)
     {
-        if (items is null)
-            throw new ArgumentNullException(nameof(items));
+        if (newItems is null)
+            throw new ArgumentNullException(nameof(newItems));
 
-        var itemList = items.ToList();
+        var itemList = newItems.ToList();
 
-        if (string.IsNullOrWhiteSpace(reservationId))
-            throw new ArgumentException("Reservation ID cannot be empty.", nameof(reservationId));
+        if (string.IsNullOrWhiteSpace(newReservationId))
+            throw new ArgumentException("Reservation ID cannot be empty.", nameof(newReservationId));
 
-        if (string.IsNullOrWhiteSpace(orderId))
-            throw new ArgumentException("Order ID cannot be empty.", nameof(orderId));
+        if (string.IsNullOrWhiteSpace(newOrderId))
+            throw new ArgumentException("Order ID cannot be empty.", nameof(newOrderId));
 
         if (itemList.Count == 0)
-            throw new ArgumentException("Reservation must contain at least one item.", nameof(items));
+            throw new ArgumentException("Reservation must contain at least one item.", nameof(newItems));
 
-        if (expiresAt <= DateTime.UtcNow)
-            throw new ArgumentException("Expiration date must be in the future.", nameof(expiresAt));
+        if (newExpiresAt <= DateTime.UtcNow)
+            throw new ArgumentException("Expiration date must be in the future.", nameof(newExpiresAt));
 
-        ReservationId = reservationId;
-        OrderId = orderId;
+        ReservationId = newReservationId;
+        OrderId = newOrderId;
         Items = itemList;
         Status = ReservationStatus.Pending;
         CreatedAt = DateTime.UtcNow;
         UpdatedAt = DateTime.UtcNow;
-        ExpiresAt = expiresAt;
+        ExpiresAt = newExpiresAt;
     }
 
     [BsonRepresentation(BsonType.ObjectId)]

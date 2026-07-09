@@ -6,6 +6,9 @@ using InventoryService.Infrastructure.Mongo;
 using InventoryService.Infrastructure.Redis;
 using InventoryService.Infrastructure.Repositories.Inventory;
 using InventoryService.Infrastructure.Repositories.Reservations;
+using InventoryService.Infrastructure.Repositories.Checkpoints;
+using InventoryService.Infrastructure.Repositories.DeadLetterQueue;
+using InventoryService.Infrastructure.BackgroundJobs;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -20,6 +23,8 @@ public static class InfrastructureRegistrar
     {
         services.Configure<MongoDbOptions>(configuration.GetSection(nameof(MongoDbOptions)));
         services.Configure<RedisOptions>(configuration.GetSection(nameof(RedisOptions)));
+        services.Configure<ExpiryWorkerOptions>(configuration.GetSection(nameof(ExpiryWorkerOptions)));
+        services.AddHostedService<ReservationExpiryBackgroundService>();
 
         services.AddSingleton<IMongoClient>(_ =>
         {
@@ -42,6 +47,8 @@ public static class InfrastructureRegistrar
         services.AddSingleton<InventoryItemsCollectionInitializer>();
         services.AddSingleton<ReservationsCollectionInitializer>();
         services.AddSingleton<InventoryTransactionsCollectionInitializer>();
+        services.AddSingleton<CheckpointsCollectionInitializer>();
+        services.AddSingleton<DeadLetterQueueCollectionInitializer>();
         services.AddSingleton<MongoCollectionInitializer>();
 
         services.AddSingleton<IDistributedLockService, RedisDistributedLockService>();
@@ -58,6 +65,8 @@ public static class InfrastructureRegistrar
         services.AddScoped<IInventoryItemRepository, InventoryItemRepository>();
         services.AddScoped<IReservationRepository, ReservationRepository>();
         services.AddScoped<IInventoryTransactionRepository, InventoryTransactionRepository>();
+        services.AddScoped<ICheckpointRepository, CheckpointRepository>();
+        services.AddScoped<IDeadLetterQueueRepository, DeadLetterQueueRepository>();
         services.AddScoped<IInventoryUnitOfWork, InventoryUnitOfWork>();
         services.AddScoped<IMongoSessionProvider, MongoSessionProvider>();
 

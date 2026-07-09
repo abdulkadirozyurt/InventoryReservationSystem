@@ -2,7 +2,7 @@
 
 Caveman mode: short. Clear. Why > what. Keep strict architectural intent.
 Project status, roadmap, and phase checklist are tracked in this file (`AGENTS.md`) under the "Current Focus" and "Live Project State" sections. Treat this document as a living organism.
-README.md is the public project entry point and must stay continuously up to date as the project evolves. Update README.md after architecture, dependency, setup, endpoint, workflow, or status changes. Include or update helpful visual sections, especially Mermaid diagrams (e.g., service communication flow or proto structures), to prevent README from being purely textual.
+README.md is the public project showcase/vitrine and must stay accurate without becoming an implementation dump. Update README.md after public-facing architecture, dependency, setup, endpoint, workflow, or status changes, but keep it high-level and polished. Do not add heavy per-file/per-operation internals there; put detailed task implementation notes in plans, AGENTS.md, or focused docs instead. Include or update helpful visual sections, especially Mermaid diagrams (e.g., service communication flow or proto structures), when they improve public understanding.
 
 ## 1. Core Agent Philosophy & Rules
 
@@ -161,12 +161,12 @@ Update this file when a service boundary, communication pattern, or structural c
 ## FAZ 5: Otomatik Süre Aşımı (Expiry) ve Gelişmiş Operasyonel Özellikler
 *Hedef: Sistemin kendi kendini temizlemesini sağlamak ve ileri düzey operasyonel gereksinimleri karşılamak.*
 
-- [ ] **Adım 5.1: Arka Plan Süre Aşımı Motoru (Background Job)**
+- [x] **Adım 5.1: Arka Plan Süre Aşımı Motoru (Background Job)**
   - InventoryService içinde çalışan background job, OrderService veritabanını taramayacak; dahili `Reservations` koleksiyonunda `status = Pending` ve `expiresAt <= now` olan rezervasyonları tarayacak.
   - Süresi dolan rezervasyonlar aynı `ReleaseBatch` semantiğiyle serbest bırakılacak: `quantityReserved` azaltılacak, `quantityAvailable` artırılacak.
   - Başarılı expiry sonrası rezervasyon kaydı `Expired` durumuna geçirilecek ve transaction log'a `Release`/`Expired` bağlamı yazılacak.
   - Expiry job scan başlangıç/bitiş, bulunan pending reservation sayısı, başarılı/başarısız release sonuçları, lock timeout ve transient hatalar loglanacak.
-- [ ] **Adım 5.2: Checkpoint Mekanizması**
+- [x] **Adım 5.2: Checkpoint Mekanizması**
   - Background job'un çökme/yeniden başlama durumlarında kaldığı yeri bilmesi için MongoDB üzerinde bir checkpoint (işaret noktası) mekanizması kurulacak.
   - Checkpoint kaydı scan cursor/zaman damgası ve son işlenen `reservationId` bilgisini tutacak; restart sonrası duplicate release üretmeden devam edilecek.
   - Checkpoint okuma/yazma, restart sonrası kaldığı yerden devam etme ve duplicate release engelleme kararları technical log olarak yazılacak.

@@ -227,12 +227,22 @@ public sealed class ReleaseBatchCommandHandler(
                         command.CorrelationId,
                         currentReservation.ReservationId,
                         currentReservation.OrderId,
-                        null);
+                        // Expiry vs Release audit sebebi ayni branch'te karar verilir.
+                        command.IsExpiry ? "Expired" : "Released");
 
                     await inventoryTransactionRepository.AddAsync(transaction, transactionCancellationToken);
                 }
 
-                currentReservation.Release();
+                // IsExpiry true => Expire() status = Expired, audit "Expired" (background job).
+                // IsExpiry false => Release() status = Released, audit "Released" (client cancel/manual).
+                if (command.IsExpiry)
+                {
+                    currentReservation.Expire();
+                }
+                else
+                {
+                    currentReservation.Release();
+                }
                 await reservationRepository.UpdateAsync(currentReservation, transactionCancellationToken);
 
                 // Stok, audit ve reservation status aynı transaction içinde başarıyla tamamlandı.

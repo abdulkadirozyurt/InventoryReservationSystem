@@ -34,4 +34,14 @@ public interface IReservationRepository
     /// <param name="reservation">The reservation to update.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task UpdateAsync(Reservation reservation, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets pending reservations expired by now, starting after checkpoint cursor.
+    /// </summary>
+    Task<List<Reservation>> GetExpiredPendingReservationsAsync(
+        DateTime now,
+        DateTime? cursorTimestamp,
+        string? lastReservationId,
+        int limit,
+        CancellationToken cancellationToken = default);
 }

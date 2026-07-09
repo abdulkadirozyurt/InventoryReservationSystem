@@ -165,4 +165,60 @@ public sealed class ReservationRepository(
             throw new InventoryStoreUnavailableException("Inventory store is unavailable while updating reservation", exception);
         }
     }
+
+    public async Task<List<Reservation>> GetExpiredPendingReservationsAsync(
+        DateTime now,
+        DateTime? cursorTimestamp,
+        string? lastReservationId,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var builder = Builders<Reservation>.Filter;
+            var filter = builder.Eq(r => r.Status, ReservationStatus.Pending) &
+                         builder.Lte(r => r.ExpiresAt, now);
+
+            // Composite cursor: ExpiresAt + ReservationId ile deterministic pagination.
+            // Skip/offset kullanilmaz cunku expire olan kayitlar silinmez, job restart'inda ayni kayit atlanmaz/tekrar islenmez.
+            if (cursorTimestamp.HasValue && !string.IsNullOrEmpty(lastReservationId))
+            {
+                var cursorFilter = builder.Or(
+                    builder.Gt(r => r.ExpiresAt, cursorTimestamp.Value),
+                    builder.And(
+                        builder.Eq(r => r.ExpiresAt, cursorTimestamp.Value),
+                        builder.Gt(r => r.ReservationId, lastReservationId)
+                    )
+                );
+                filter = builder.And(filter, cursorFilter);
+            }
+
+            var sort = Builders<Reservation>.Sort
+                .Ascending(r => r.ExpiresAt)
+                .Ascending(r => r.ReservationId);
+
+            var session = mongoSessionProvider.CurrentSession;
+            if (session is not null)
+            {
+                return await _collection.Find(session, filter)
+                    .Sort(sort)
+                    .Limit(limit)
+                    .ToListAsync(cancellationToken);
+            }
+
+            return await _collection.Find(filter)
+                .Sort(sort)
+                .Limit(limit)
+                .ToListAsync(cancellationToken);
+        }
+        catch (MongoException exception)
+        {
+            logger.LogError(
+                exception,
+                "MongoDB failed while querying expired reservations. ErrorCategory: {ErrorCategory}",
+                "TransientMongoError");
+
+            throw new InventoryStoreUnavailableException("Inventory store is unavailable while querying expired reservations", exception);
+        }
+    }
 }
