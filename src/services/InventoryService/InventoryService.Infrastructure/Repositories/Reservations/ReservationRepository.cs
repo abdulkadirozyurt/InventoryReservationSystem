@@ -64,6 +64,43 @@ public sealed class ReservationRepository(
         }
     }
 
+    public async Task<Reservation?> GetByOrderIdAsync(string orderId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var filter = Builders<Reservation>.Filter.Eq(
+                reservation => reservation.OrderId,
+                orderId);
+
+            // Mongo transaction açıksa aynı session üzerinden okuyoruz.
+            // Böylece reservation kontrolü transaction'ın geri kalanıyla aynı bağlamda çalışıyor.
+            var session = mongoSessionProvider.CurrentSession;
+
+            if (session is not null)
+            {
+                return await _collection
+                    .Find(session, filter)
+                    .FirstOrDefaultAsync(cancellationToken);
+            }
+
+            return await _collection
+                .Find(filter)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+        catch (MongoException exception)
+        {
+            logger.LogError(
+                exception,
+                "MongoDB failed while retrieving reservation by order. OrderId: {OrderId}, ErrorCategory: {ErrorCategory}",
+                orderId,
+                "TransientMongoError");
+
+            throw new InventoryStoreUnavailableException(
+                "Inventory store is unavailable while retrieving reservation by order",
+                exception);
+        }
+    }
+
     public async Task UpdateAsync(Reservation reservation, CancellationToken cancellationToken = default)
     {
         try

@@ -1,3 +1,4 @@
+using InventoryService.Domain.Reservations;
 using InventoryService.Infrastructure.Mongo;
 using Microsoft.Extensions.Options;
 using MongoDB.Bson;
@@ -7,17 +8,24 @@ namespace InventoryService.Infrastructure.CollectionInitializers;
 
 public sealed class ReservationsCollectionInitializer(IMongoDatabase database, IOptions<MongoDbOptions> options)
 {
+    private readonly string collectionName = options.Value.ReservationsCollectionName;
+
+    private readonly IMongoCollection<Reservation> collection =
+        database.GetCollection<Reservation>(options.Value.ReservationsCollectionName);
+
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        var collectionName = options.Value.ReservationsCollectionName;
-
-        if (await CollectionExistsAsync(collectionName, cancellationToken))
+        if (await CollectionExistsAsync(cancellationToken))
         {
             await ApplyValidationAsync(collectionName, cancellationToken);
-            return;
+        }
+        else
+        {
+            await CreateCollectionAsync(collectionName, cancellationToken);
         }
 
-        await CreateCollectionAsync(collectionName, cancellationToken);
+        // Collection ister önceden var olsun ister yeni oluşsun, gerekli indexleri kontrol ediyoruz.
+        await CreateIndexesAsync(cancellationToken);
     }
 
     private async Task CreateCollectionAsync(string collectionName, CancellationToken cancellationToken)
@@ -128,7 +136,7 @@ public sealed class ReservationsCollectionInitializer(IMongoDatabase database, I
         };
     }
 
-    private async Task<bool> CollectionExistsAsync(string collectionName, CancellationToken cancellationToken)
+    private async Task<bool> CollectionExistsAsync(CancellationToken cancellationToken)
     {
         var filter = new BsonDocument("name", collectionName);
 
@@ -137,5 +145,38 @@ public sealed class ReservationsCollectionInitializer(IMongoDatabase database, I
             cancellationToken);
 
         return await cursor.AnyAsync(cancellationToken);
+    }
+
+    private async Task CreateIndexesAsync(CancellationToken cancellationToken)
+    {
+        var indexModels = new[]
+        {
+            new CreateIndexModel<Reservation>(
+                Builders<Reservation>.IndexKeys.Ascending(reservation => reservation.OrderId),
+                new CreateIndexOptions
+                {
+                    Name = "ux_reservations_order_id",
+                    Unique = true
+                }),
+            new CreateIndexModel<Reservation>(
+                Builders<Reservation>.IndexKeys.Ascending(reservation => reservation.ReservationId),
+                new CreateIndexOptions
+                {
+                    Name = "ux_reservations_reservation_id",
+                    Unique = true
+                }),
+            new CreateIndexModel<Reservation>(
+                Builders<Reservation>.IndexKeys
+                    .Ascending(reservation => reservation.Status)
+                    .Ascending(reservation => reservation.ExpiresAt),
+                new CreateIndexOptions
+                {
+                    Name = "ix_reservations_status_expires_at"
+                })
+        };
+
+        // Bu indexler aynı order için ikinci reservation yazılmasını engeller.
+        // Ayrıca reservationId'nin tekil kalmasını ve expire taramalarının hızlı çalışmasını sağlar.
+        await collection.Indexes.CreateManyAsync(indexModels, cancellationToken);
     }
 }
