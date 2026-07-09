@@ -1,5 +1,6 @@
 using InventoryService.API.Extensions;
 using InventoryService.API.Grpc;
+using InventoryService.API.Interceptors;
 using InventoryService.Application;
 using InventoryService.Infrastructure;
 using InventoryService.Infrastructure.CollectionInitializers;
@@ -11,7 +12,10 @@ builder.Host.UseInventorySerilog();
 builder.AddServiceDefaults();
 
 builder.Services.AddOpenApi();
-builder.Services.AddGrpc();
+builder.Services.AddGrpc(options =>
+{
+    options.Interceptors.Add<GrpcExceptionInterceptor>();
+});
 
 builder.Services.AddApplicationServices();
 builder.Services.AddInfrastructureServices(builder.Configuration);
