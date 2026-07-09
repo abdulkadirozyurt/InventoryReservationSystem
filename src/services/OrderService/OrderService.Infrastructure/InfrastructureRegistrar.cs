@@ -9,6 +9,7 @@ using OrderService.Infrastructure.HealthChecks;
 using OrderService.Infrastructure.Mongo;
 using OrderService.Infrastructure.Repositories.Orders;
 using OrderService.Infrastructure.Services;
+using OrderService.Infrastructure.Idempotency;
 
 namespace OrderService.Infrastructure;
 
@@ -19,6 +20,7 @@ public static class InfrastructureRegistrar
         MongoOrderMappings.Register();
 
         services.Configure<MongoDbOptions>(configuration.GetSection(nameof(MongoDbOptions)));
+        services.Configure<IdempotencyOptions>(configuration.GetSection(IdempotencyOptions.SectionName));
 
         services.AddSingleton<IMongoClient>(_ =>
         {
@@ -47,6 +49,11 @@ public static class InfrastructureRegistrar
         services.AddScoped<IOrderHistoryRepository, OrderHistoryRepository>();
         services.AddScoped<IOrderUnitOfWork, OrderUnitOfWork>();
         services.AddScoped<IInventoryReservationService, InventoryReservationService>();
+
+        services.AddScoped<IIdempotencyStore, RedisIdempotencyStore>();
+
+
+
         services.AddGrpcClient<InventoryReservations.InventoryReservationsClient>(options =>
         {
             options.Address = new Uri(configuration["InventoryService:Address"]!);
