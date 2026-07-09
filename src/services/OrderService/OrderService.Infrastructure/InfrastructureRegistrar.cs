@@ -10,6 +10,7 @@ using OrderService.Infrastructure.Mongo;
 using OrderService.Infrastructure.Repositories.Orders;
 using OrderService.Infrastructure.Services;
 using OrderService.Infrastructure.Idempotency;
+using StackExchange.Redis;
 
 namespace OrderService.Infrastructure;
 
@@ -49,6 +50,27 @@ public static class InfrastructureRegistrar
         services.AddScoped<IOrderHistoryRepository, OrderHistoryRepository>();
         services.AddScoped<IOrderUnitOfWork, OrderUnitOfWork>();
         services.AddScoped<IInventoryReservationService, InventoryReservationService>();
+
+
+        services.AddSingleton<IConnectionMultiplexer>(_ =>
+        {
+            var connectionString = configuration.GetConnectionString("Redis");
+
+            if (string.IsNullOrWhiteSpace(connectionString))
+                throw new InvalidOperationException("Redis connection string is missing.");
+
+            return ConnectionMultiplexer.Connect(connectionString);
+        });
+
+        // Redis'te gerçek okuma/yazma işini IDatabase yapıyor.
+        // IConnectionMultiplexer ana bağlantı nesnesi, IDatabase ise o bağlantıdan alınan çalışma alanı gibi düşünebilirsin.
+        services.AddScoped(sp =>
+            sp.GetRequiredService<IConnectionMultiplexer>().GetDatabase());
+
+        // services.Configure<IdempotencyOptions>() bize IOptions<IdempotencyOptions> verir.
+        // RedisIdempotencyStore ise doğrudan IdempotencyOptions istediği için burada value halini ayrıca DI'a koyuyoruz.
+        services.AddSingleton(sp =>
+            sp.GetRequiredService<IOptions<IdempotencyOptions>>().Value);
 
         services.AddScoped<IIdempotencyStore, RedisIdempotencyStore>();
 

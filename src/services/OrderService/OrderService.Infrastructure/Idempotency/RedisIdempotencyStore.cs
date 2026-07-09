@@ -6,6 +6,11 @@ using StackExchange.Redis;
 
 namespace OrderService.Infrastructure.Idempotency;
 
+// Redis üzerinde Idempotency-Key yaşam döngüsünü yöneten gerçek store'dur.
+// İlk gelen create-order isteği key'i "Processing" olarak claim eder.
+// İşlem başarıyla bitince aynı key "Completed" durumuna geçirilir ve HTTP response saklanır.
+// Aynı key tekrar gelirse yeni order oluşturmak yerine Redis'teki eski response replay edilir.
+// Aynı key farklı request body ile kullanılırsa conflict kabul edilir.
 public sealed class RedisIdempotencyStore(IDatabase redisDatabase, IdempotencyOptions options, ILogger<RedisIdempotencyStore> logger) : IIdempotencyStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerOptions.Web);
@@ -15,15 +20,17 @@ public sealed class RedisIdempotencyStore(IDatabase redisDatabase, IdempotencyOp
     {
         var redisKey = BuildKey(idempotencyKey);
 
+        // işlenen request için bir  entry oluşturur.
         var processingEntry = new IdempotencyEntry
         {
             State = IdempotencyEntryStates.Processing,
             RequestHash = requestHash,
-            CreatedAtUTC = DateTimeOffset.UtcNow
+            CreatedAtUtc = DateTimeOffset.UtcNow
         };
 
         try
         {
+            // Redis'te key yoksa yeni entry oluşturur ve claim eder.
             var created = await redisDatabase.StringSetAsync(
                 redisKey,
                 JsonSerializer.Serialize(processingEntry, JsonOptions),
@@ -36,31 +43,35 @@ public sealed class RedisIdempotencyStore(IDatabase redisDatabase, IdempotencyOp
                 return new IdempotencyClaimResult(IdempotencyClaimStatus.Claimed);
             }
 
+            // Redis'te key varsa mevcut entry'yi alır ve duruma göre claim sonucunu döner.
             var existingValue = await redisDatabase.StringGetAsync(redisKey);
             if (!existingValue.HasValue)
             {
                 return new IdempotencyClaimResult(IdempotencyClaimStatus.StoreUnavailable);
             }
 
-            var existing = JsonSerializer.Deserialize<IdempotencyEntry>((string)existingValue!, JsonOptions);
-            if (existing is null)
+            // Redis'teki entry'yi deserialize eder ve duruma göre claim sonucunu döner.
+            var existingEntry = JsonSerializer.Deserialize<IdempotencyEntry>((string)existingValue!, JsonOptions);
+            if (existingEntry is null)
             {
                 return new IdempotencyClaimResult(IdempotencyClaimStatus.StoreUnavailable);
             }
 
-            if (!string.Equals(existing.RequestHash, requestHash, StringComparison.Ordinal))
+            // Aynı key ile farklı request body gelirse conflict kabul edilir.
+            if (!string.Equals(existingEntry.RequestHash, requestHash, StringComparison.Ordinal))
             {
                 return new IdempotencyClaimResult(IdempotencyClaimStatus.Conflict);
             }
 
-            if (string.Equals(existing.State, IdempotencyEntryStates.Completed, StringComparison.Ordinal))
+            
+            if (string.Equals(existingEntry.State, IdempotencyEntryStates.Completed, StringComparison.Ordinal))
             {
                 return new IdempotencyClaimResult(
                     IdempotencyClaimStatus.Replay,
                     new IdempotencyCompletedResult(
-                        existing.StatusCode ?? StatusCodes.Status200OK,
-                        existing.ResponseBody ?? string.Empty,
-                        existing.ContentType ?? "application/json"));
+                        existingEntry.StatusCode ?? StatusCodes.Status200OK,
+                        existingEntry.ResponseBody ?? string.Empty,
+                        existingEntry.ContentType ?? "application/json"));
             }
 
             return new IdempotencyClaimResult(IdempotencyClaimStatus.Processing);
@@ -96,17 +107,17 @@ public sealed class RedisIdempotencyStore(IDatabase redisDatabase, IdempotencyOp
                 return null;
             }
 
-            var existing = JsonSerializer.Deserialize<IdempotencyEntry>((string)existingValue!, JsonOptions);
-            if (existing is null ||
-                !string.Equals(existing.State, IdempotencyEntryStates.Completed, StringComparison.Ordinal))
+            var existingEntry = JsonSerializer.Deserialize<IdempotencyEntry>((string)existingValue!, JsonOptions);
+            if (existingEntry is null ||
+                !string.Equals(existingEntry.State, IdempotencyEntryStates.Completed, StringComparison.Ordinal))
             {
                 return null;
             }
 
             return new IdempotencyCompletedResult(
-                existing.StatusCode ?? StatusCodes.Status200OK,
-                existing.ResponseBody ?? string.Empty,
-                existing.ContentType ?? "application/json");
+                existingEntry.StatusCode ?? StatusCodes.Status200OK,
+                existingEntry.ResponseBody ?? string.Empty,
+                existingEntry.ContentType ?? "application/json");
         }
         catch (RedisTimeoutException ex)
         {
@@ -143,7 +154,7 @@ public sealed class RedisIdempotencyStore(IDatabase redisDatabase, IdempotencyOp
             StatusCode = statusCode,
             ResponseBody = responseBody,
             ContentType = contentType,
-            CreatedAtUTC = DateTimeOffset.UtcNow
+            CreatedAtUtc = DateTimeOffset.UtcNow
         };
 
 

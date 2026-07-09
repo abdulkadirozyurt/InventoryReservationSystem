@@ -6,8 +6,8 @@ public sealed class IdempotencyEntry
     public required string RequestHash { get; init; }
     public int? StatusCode { get; init; }
     public string? ResponseBody { get; init; }
-    public string? ContentType { get; set; }
-    public DateTimeOffset? CreatedAtUTC { get; init; }
+    public string? ContentType { get; init; }
+    public DateTimeOffset CreatedAtUtc { get; init; }
 }
 
 public static class IdempotencyEntryStates
