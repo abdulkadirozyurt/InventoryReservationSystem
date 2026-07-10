@@ -25,6 +25,7 @@ public static class InfrastructureRegistrar
         services.Configure<RedisOptions>(configuration.GetSection(nameof(RedisOptions)));
         services.Configure<ExpiryWorkerOptions>(configuration.GetSection(nameof(ExpiryWorkerOptions)));
         services.Configure<ReconciliationWorkerOptions>(configuration.GetSection(nameof(ReconciliationWorkerOptions)));
+        services.Configure<SeedDataOptions>(configuration.GetSection(SeedDataOptions.SectionName));
         services.AddHostedService<ReservationExpiryBackgroundService>();
         services.AddHostedService<InventoryReconciliationBackgroundService>();
 
@@ -52,6 +53,7 @@ public static class InfrastructureRegistrar
         services.AddSingleton<CheckpointsCollectionInitializer>();
         services.AddSingleton<DeadLetterQueueCollectionInitializer>();
         services.AddSingleton<InventorySnapshotsCollectionInitializer>();
+        services.AddSingleton<InventorySeedDataService>();
         services.AddSingleton<MongoCollectionInitializer>();
 
         services.AddSingleton<IDistributedLockService, RedisDistributedLockService>();

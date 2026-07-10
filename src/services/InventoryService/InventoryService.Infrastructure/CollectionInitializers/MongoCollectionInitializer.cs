@@ -1,3 +1,6 @@
+using InventoryService.Infrastructure.Mongo;
+using Microsoft.Extensions.Options;
+
 namespace InventoryService.Infrastructure.CollectionInitializers;
 
 public sealed class MongoCollectionInitializer(
@@ -6,7 +9,9 @@ public sealed class MongoCollectionInitializer(
     InventoryTransactionsCollectionInitializer inventoryTransactionsInitializer,
     CheckpointsCollectionInitializer checkpointsInitializer,
     DeadLetterQueueCollectionInitializer deadLetterQueueInitializer,
-    InventorySnapshotsCollectionInitializer inventorySnapshotsInitializer)
+    InventorySnapshotsCollectionInitializer inventorySnapshotsInitializer,
+    InventorySeedDataService inventorySeedDataService,
+    IOptions<SeedDataOptions> seedDataOptions)
 {
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -16,5 +21,10 @@ public sealed class MongoCollectionInitializer(
         await checkpointsInitializer.InitializeAsync(cancellationToken);
         await deadLetterQueueInitializer.InitializeAsync(cancellationToken);
         await inventorySnapshotsInitializer.InitializeAsync(cancellationToken);
+
+        if (seedDataOptions.Value.Enabled)
+        {
+            await inventorySeedDataService.SeedAsync(cancellationToken);
+        }
     }
 }
