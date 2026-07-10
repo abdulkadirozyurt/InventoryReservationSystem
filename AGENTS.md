@@ -167,6 +167,36 @@ Detailed definition, requirements, evaluation scenarios, and deliverables: [requ
   - Audit fix: host `mongosh` yoksa Docker Compose MongoDB container fallback kullanır
   - Runtime proof: Compose verisiyle invariant verifier 5/5 geçti
 
+### FAZ 7: Dockerized React Demo Frontend
+
+**Hedef:** Teslim/demoda backend özelliklerini tek bir Docker Compose ortamında tarayıcıdan test edilebilir hale getirmek.
+
+- [x] **7.1 — Docker Frontend Servisi**
+  - `frontend-web` Docker Compose servisi eklendi; `inventory-reservation-network` içinde çalışır
+  - Nginx SPA host: `http://localhost:5173`
+  - `/api/*`, `/health`, `/health/ready` istekleri Docker DNS ile `orderservice-api:8080` hedefine proxy edilir
+  - OrderService için local Vite dev CORS origin'i `http://localhost:5173` olarak eklendi
+- [x] **7.2 — React/Vite TypeScript UI**
+  - `src/web/InventoryReservationSystem.Web/` oluşturuldu
+  - React Router, TanStack Query, typed API client, normalized error handling, reusable UI components eklendi
+  - UI sayfaları: dashboard, create order, orders list/filter, order detail, bulk cancel, health
+- [x] **7.3 — Endpoint Coverage ve Demo Akışları**
+  - Create order + editable `Idempotency-Key`
+  - List/filter orders
+  - Order detail
+  - Confirm order
+  - Cancel order
+  - Bulk cancel
+  - Analytics KPI kartları
+  - Health/readiness status kartları ve Grafana/Prometheus/RedisInsight linkleri
+- [x] **7.4 — Verification Proof**
+  - `npm run build --prefix src/web/InventoryReservationSystem.Web` geçti
+  - `docker compose config --quiet` geçti
+  - `docker compose build frontend-web` geçti
+  - `dotnet build InventoryReservationSystem.slnx` geçti (mevcut NuGet/nullable uyarılarıyla)
+  - Runtime proof: `http://localhost:5173/`, `/health`, `/health/ready`, `/api/orders` 200 döndü
+  - Runtime proof: frontend proxy üzerinden create/detail/confirm/cancel/bulk-cancel/analytics akışları çalıştı
+
 ### Live Project State
 
 - [x] **Phase 1:** Altyapı, Protokoller ve İzlenebilirlik Kurulumu
@@ -175,6 +205,7 @@ Detailed definition, requirements, evaluation scenarios, and deliverables: [requ
 - [x] **Phase 4:** OrderService Sipariş Yönetimi ve Dirençli (Resilient) Entegrasyonlar
 - [x] **Phase 5:** Otomatik Süre Aşımı (Expiry) ve Gelişmiş Operasyonel Özellikler
 - [x] **Phase 6:** İzlenebilirlik Panelleri, Doğrulama, Stres Testleri ve Kararlılık Kontrolleri
+- [x] **Phase 7:** Dockerized React Demo Frontend
 
 ## 4. Status Automation & Known Gaps
 

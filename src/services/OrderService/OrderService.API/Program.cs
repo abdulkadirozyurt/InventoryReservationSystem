@@ -15,6 +15,16 @@ builder.Services.AddInfrastructureServices(builder.Configuration);
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<OrderServiceExceptionHandler>();
 
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.WithOrigins("http://localhost:5173")
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
@@ -22,6 +32,7 @@ var app = builder.Build();
 await app.Services.GetRequiredService<MongoCollectionInitializer>().InitializeAsync();
 
 app.UseCorrelationId();
+app.UseCors();
 app.UseExceptionHandler();
 
 

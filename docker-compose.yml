@@ -187,6 +187,17 @@ services:
     networks:
       - inventory-reservation-network
 
+  frontend-web:
+    build:
+      context: ./src/web/InventoryReservationSystem.Web
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - orderservice-api
+    networks:
+      - inventory-reservation-network
+
 volumes:
   mongodb_data:
   redis_data:

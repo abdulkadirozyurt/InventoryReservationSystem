@@ -147,6 +147,7 @@ sequenceDiagram
 ## Tech Stack
 
 - **Framework**: [.NET 10](https://dotnet.microsoft.com/download/dotnet/10.0) (C# Web API & gRPC)
+- **Frontend**: React + Vite + TypeScript, served by nginx in Docker Compose
 - **Database**: [MongoDB 8.2](https://www.mongodb.com/) (Configured as a single-node replica set to support multi-document transactions)
 - **Caching & Locking**: [Redis 8.8](https://redis.io/) (For high-speed distributed locking via `StackExchange.Redis`)
 - **Observability Collectors**: [Grafana Alloy 1.17](https://grafana.com/docs/alloy/latest/)
@@ -168,6 +169,8 @@ InventoryReservationSystem/
 ├── src/
 │   ├── contracts/
 │   │   └── InventoryReservationSystem.Contracts/ # Generated gRPC C# clients and Protobuf contract definitions
+│   ├── web/
+│   │   └── InventoryReservationSystem.Web/       # React demo frontend for browser-driven flows
 │   └── services/
 │       ├── InventoryService/
 │       │   ├── InventoryService.API/            # Grpc endpoint layer, Serilog config & program bootstrap
@@ -190,6 +193,18 @@ InventoryReservationSystem/
 ├── docker-compose.yml                           # Starts services, databases, replica sets, and telemetry
 └── InventoryReservationSystem.slnx              # Modern .NET solution file structure
 ```
+
+---
+
+## Demo Frontend
+
+A Dockerized React UI is available for end-to-end demonstrations without calling the APIs manually.
+
+```powershell
+docker compose up --build
+```
+
+Open `http://localhost:5173` to create, list, inspect, confirm, cancel, and bulk-cancel orders through OrderService. The UI also surfaces analytics and backend health/readiness status, while linking to Grafana (`http://localhost:3000`), Prometheus (`http://localhost:9090`), and RedisInsight (`http://localhost:5540`).
 
 ---
 

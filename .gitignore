@@ -369,3 +369,8 @@ Docs/*
 .claude/
 .github/
 .vscode/
+
+# Frontend
+src/web/**/node_modules/
+src/web/**/dist/
+src/web/**/*.tsbuildinfo
