@@ -1,0 +1,89 @@
+apiVersion: 1
+groups:
+  - name: LockContention
+    folder: InventoryReservationSystem
+    interval: 30s
+    rules:
+      - uid: high_lock_contention
+        title: "High Lock Contention"
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: '(sum(rate(inventory_distributed_lock_acquire_attempts_total{outcome="failure"}[5m])) / clamp_min(sum(rate(inventory_distributed_lock_acquire_attempts_total[5m])), 1)) > 0.1'
+              intervalMs: 15000
+              maxDataPoints: 100
+        annotations:
+          summary: "Lock contention exceeded 10%."
+        labels:
+          severity: warning
+
+  - name: ErrorRate
+    folder: InventoryReservationSystem
+    interval: 30s
+    rules:
+      - uid: rising_5xx_rate
+        title: "Rising HTTP 5xx Error Rate"
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: 'sum(rate(http_server_request_duration_seconds_count{job=~"InventoryService|OrderService|inventoryservice-api|orderservice-api", http_response_status_code=~"5.."}[5m])) > 0.5'
+              intervalMs: 15000
+              maxDataPoints: 100
+        annotations:
+          summary: "HTTP 5xx rate > 0.5 req/s"
+        labels:
+          severity: critical
+
+  - name: Latency
+    folder: InventoryReservationSystem
+    interval: 30s
+    rules:
+      - uid: slow_http_latency
+        title: "Slow HTTP Latency"
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: 'histogram_quantile(0.99, sum(rate(http_server_request_duration_seconds_bucket{job=~"InventoryService|OrderService|inventoryservice-api|orderservice-api"}[10m])) by (le)) > 5'
+              intervalMs: 15000
+              maxDataPoints: 100
+        annotations:
+          summary: "HTTP p99 latency > 5s"
+        labels:
+          severity: warning
+
+  - name: CircuitBreaker
+    folder: InventoryReservationSystem
+    interval: 30s
+    rules:
+      - uid: open_circuit_breaker
+        title: "Open Circuit Breaker"
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: 'sum(rate(http_client_request_duration_seconds_count{job=~"InventoryService|OrderService|inventoryservice-api|orderservice-api", http_response_status_code=~"5.."}[5m])) by (job) > 2'
+              intervalMs: 15000
+              maxDataPoints: 100
+        annotations:
+          summary: "High gRPC client error rate — circuit breaker likely open for {{ $labels.job }}"
+        labels:
+          severity: critical

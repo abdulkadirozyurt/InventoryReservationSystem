@@ -1,0 +1,123 @@
+{
+  "uid": "inventory-service-drilldown",
+  "title": "InventoryService — Detail",
+  "description": "InventoryService özel dashboardu; rezervasyon, Redis lock, stok ve gRPC davranışını tek servis odağında gösterir.",
+  "tags": ["docker-service-network", "service", "inventoryservice"],
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "editable": false,
+  "refresh": "30s",
+  "time": { "from": "now-30m", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "type": "constant",
+        "query": "InventoryService",
+        "current": { "text": "InventoryService", "value": "InventoryService" }
+      }
+    ]
+  },
+  "links": [
+    { "title": "Ana dashboard", "type": "link", "url": "/d/docker-service-network-overview/docker-service-network-observability-overview", "includeVars": false, "keepTime": true },
+    { "title": "Explore logs", "type": "link", "url": "/explore?schemaVersion=1&panes=%7B%22left%22:%7B%22datasource%22:%22loki%22,%22queries%22:%5B%7B%22expr%22:%22%7Bservice_name%3D%5C%22InventoryService%5C%22%7D%22%7D%5D%7D%7D", "includeVars": false, "keepTime": true }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Health / Active Instance",
+      "description": "InventoryService process metriği varsa servis canlıdır.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "count(dotnet_process_memory_working_set_bytes{job=\"InventoryService\"})", "legendFormat": "instances" } ],
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "colorMode": "background", "textMode": "auto" }
+    },
+    {
+      "id": 2,
+      "title": "CPU / Memory",
+      "description": "Runtime kaynak tüketimi; CPU cores rate ve RAM working set birlikte izlenir.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(dotnet_process_cpu_time_seconds_total{job=\"InventoryService\"}[5m]))", "legendFormat": "cpu cores" },
+        { "refId": "B", "expr": "dotnet_process_memory_working_set_bytes{job=\"InventoryService\"} / 1024 / 1024 / 1024", "legendFormat": "memory GiB" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "title": "gRPC / HTTP Request Rate",
+      "description": "InventoryService gRPC endpointleri ASP.NET Core HTTP server metricleri altında görünür.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (http_route, http_response_status_code) (rate(http_server_request_duration_seconds_count{job=\"InventoryService\"}[5m]))", "legendFormat": "{{http_route}} {{http_response_status_code}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "title": "Reservation Operations / Failures",
+      "description": "Rezervasyon başarı ve hata metrikleri operasyon ve hata sınıfı bazında ayrılır.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (operation) (rate(inventory_reservation_operation_count_total[5m]))", "legendFormat": "success {{operation}}" },
+        { "refId": "B", "expr": "sum by (operation, error_class) (rate(inventory_reservation_failure_count_total[5m])) or vector(0)", "legendFormat": "failure {{operation}} {{error_class}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "title": "Reservation Duration p95",
+      "description": "Rezervasyon işlem süreleri custom histogram metriğinden hesaplanır; metric unit ms olduğu için panel ms gösterir.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "histogram_quantile(0.95, sum(rate(inventory_reservation_operation_duration_milliseconds_bucket[5m])) by (operation, le))", "legendFormat": "{{operation}} p95" } ],
+      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "title": "Redis Lock Acquire / Release",
+      "description": "Lock acquire/release outcome serileri lock contention ve unlock sorunlarını gösterir.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (outcome) (rate(inventory_distributed_lock_acquire_attempts_total[5m]))", "legendFormat": "acquire {{outcome}}" },
+        { "refId": "B", "expr": "sum by (outcome) (rate(inventory_distributed_lock_release_attempts_total[5m]))", "legendFormat": "release {{outcome}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "title": "Stock Adjustments",
+      "description": "Operasyonel stok düzeltme işlemlerinin başarı/hata hızını gösterir.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (operation) (rate(inventory_stock_adjustment_count_total[5m])) or vector(0)", "legendFormat": "success {{operation}}" },
+        { "refId": "B", "expr": "sum by (operation, error_class) (rate(inventory_stock_adjustment_failure_count_total[5m])) or vector(0)", "legendFormat": "failure {{operation}} {{error_class}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 8,
+      "title": "Recent InventoryService Logs",
+      "description": "Loglardan trace'e geçiş Loki datasource derived field ve Tempo tracesToLogsV2 ile desteklenir.",
+      "type": "logs",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [ { "refId": "A", "expr": "{service_name=\"InventoryService\"}", "range": true } ],
+      "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" }
+    }
+  ]
+}

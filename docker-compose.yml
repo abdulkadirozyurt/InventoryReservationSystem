@@ -5,6 +5,8 @@ services:
       dockerfile: src/services/InventoryService/InventoryService.API/Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
+      OTEL_SERVICE_NAME: InventoryService
     ports:
       - "5032:8080"
       - "5081:8081"
@@ -22,6 +24,8 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
       InventoryService__Address: http://inventoryservice-api:8081
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
+      OTEL_SERVICE_NAME: OrderService
     ports:
       - "5041:8080"
     depends_on:
@@ -168,9 +172,14 @@ services:
       GF_USERS_ALLOW_SIGN_UP: false
       GF_PLUGINS_PLUGIN_ADMIN_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./observability/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./observability/grafana/provisioning/alerting:/etc/grafana/provisioning/alerting:ro
+      - ./observability/grafana/dashboards:/etc/grafana/dashboards:ro
     depends_on:
       - prometheus
       - loki

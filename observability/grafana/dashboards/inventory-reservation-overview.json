@@ -1,0 +1,155 @@
+{
+  "uid": "docker-service-network-overview",
+  "title": "Docker Service Network — Observability Overview",
+  "description": "Ana dashboard Docker Compose servis ağındaki InventoryReservationSystem servislerini tek ekranda gösterir; servis detay dashboardlarına hızlı geçiş sağlar.",
+  "tags": ["docker-service-network", "overview", "inventory", "reservation"],
+  "schemaVersion": 39,
+  "version": 2,
+  "timezone": "browser",
+  "editable": false,
+  "refresh": "30s",
+  "time": { "from": "now-30m", "to": "now" },
+  "graphTooltip": 1,
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(dotnet_process_memory_working_set_bytes, job)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "links": [
+    { "title": "InventoryService detay", "type": "link", "url": "/d/inventory-service-drilldown/inventoryservice-detail?var-service=InventoryService", "includeVars": false, "keepTime": true, "targetBlank": false },
+    { "title": "OrderService detay", "type": "link", "url": "/d/order-service-drilldown/orderservice-detail?var-service=OrderService", "includeVars": false, "keepTime": true, "targetBlank": false },
+    { "title": "Grafana Explore", "type": "link", "url": "/explore", "includeVars": true, "keepTime": true, "targetBlank": false }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Active Instances",
+      "description": "Her servis için canlı .NET process metriği varsa instance aktif kabul edilir.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "count by (job) (dotnet_process_memory_working_set_bytes{job=~\"$service\"})", "legendFormat": "{{job}}" } ],
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "orientation": "auto", "textMode": "auto", "colorMode": "background" }
+    },
+    {
+      "id": 2,
+      "title": "CPU Usage Rate",
+      "description": "dotnet_process_cpu_time_seconds_total rate değeri servis CPU tüketim hızını gösterir.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "sum by (job) (rate(dotnet_process_cpu_time_seconds_total{job=~\"$service\"}[5m]))", "legendFormat": "{{job}}" } ],
+      "fieldConfig": { "defaults": { "unit": "cores", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "title": "Memory Working Set",
+      "description": "Servis process RAM kullanımını byte cinsinden gösterir.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "dotnet_process_memory_working_set_bytes{job=~\"$service\"}", "legendFormat": "{{job}}" } ],
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "title": "HTTP Request Rate",
+      "description": "ASP.NET Core HTTP server metricleri üzerinden request/s izlenir; trafik yoksa seri doğal olarak boş kalabilir.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "sum by (job) (rate(http_server_request_duration_seconds_count{job=~\"$service\"}[5m]))", "legendFormat": "{{job}}" } ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "title": "HTTP Error Rate",
+      "description": "5xx response kodları servis bazında hata hızını gösterir.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "sum by (job) (rate(http_server_request_duration_seconds_count{job=~\"$service\", http_response_status_code=~\"5..\"}[5m])) or vector(0)", "legendFormat": "{{job}} 5xx" } ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "showPoints": "never" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.1 } ] } }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "title": "HTTP Latency p50 / p95 / p99",
+      "description": "Histogram bucket metriklerinden merkezi response time görünümü üretilir.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum(rate(http_server_request_duration_seconds_bucket{job=~\"$service\"}[5m])) by (job, le))", "legendFormat": "{{job}} p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket{job=~\"$service\"}[5m])) by (job, le))", "legendFormat": "{{job}} p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum(rate(http_server_request_duration_seconds_bucket{job=~\"$service\"}[5m])) by (job, le))", "legendFormat": "{{job}} p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "title": "Availability Approximation",
+      "description": "Son 5 dakikadaki 5xx oranından yaklaşık availability hesaplanır; SLO yerine hızlı operasyonel sinyal olarak kullanılır.",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "100 * (1 - (sum(rate(http_server_request_duration_seconds_count{job=~\"$service\", http_response_status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_request_duration_seconds_count{job=~\"$service\"}[5m])), 1)))", "legendFormat": "availability" } ],
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "orange", "value": 99 }, { "color": "green", "value": 99.9 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "colorMode": "background", "textMode": "auto" }
+    },
+    {
+      "id": 8,
+      "title": "Reservation Operations",
+      "description": "InventoryService custom application metricleriyle rezervasyon başarı/hata hacmi izlenir.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (operation) (rate(inventory_reservation_operation_count_total[5m]))", "legendFormat": "success {{operation}}" },
+        { "refId": "B", "expr": "sum by (operation, error_class) (rate(inventory_reservation_failure_count_total[5m])) or vector(0)", "legendFormat": "failure {{operation}} {{error_class}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 9,
+      "title": "Redis Lock Contention",
+      "description": "Lock acquire outcome değerleri Redis contention ve locking sorunlarını hızlı gösterir.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "sum by (outcome) (rate(inventory_distributed_lock_acquire_attempts_total[5m]))", "legendFormat": "{{outcome}}" } ],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 10,
+      "title": "Recent Logs",
+      "description": "Loki OTLP log akışları servis adına göre süzülür; log satırındaki trace id varsa Tempo bağlantısı datasource seviyesinde üretilir.",
+      "type": "logs",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [ { "refId": "A", "expr": "{service_name=~\"$service\"}", "range": true } ],
+      "options": { "showTime": true, "showLabels": true, "showCommonLabels": false, "wrapLogMessage": true, "prettifyLogMessage": false, "enableLogDetails": true, "dedupStrategy": "none", "sortOrder": "Descending" }
+    },
+    {
+      "id": 11,
+      "title": "Telemetry Gaps / Next Collectors",
+      "description": "Uygulama OTLP metrik/log/trace üretir. Container network metrikleri için cAdvisor veya node_exporter henüz yok; bu panel bilinçli gap kaydıdır.",
+      "type": "text",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "options": {
+        "mode": "markdown",
+        "content": "### Eksik telemetry\n\n- **Network I/O:** Uygulama container seviyesinde network metric üretmiyor. Production için cAdvisor/node_exporter eklenmeli.\n- **Trace → log tamlığı:** Tempo `tracesToLogsV2` yapılandırıldı. Loglarda `trace_id` label/metadata görünürlüğü runtime OTLP log formatına bağlı.\n- **Service graph:** Tempo datasource Prometheus'a bağlandı; span/service graph metrikleri üretmek için ileride Tempo metrics-generator veya Alloy spanmetrics connector eklenebilir."
+      }
+    }
+  ]
+}

@@ -1,22 +1,73 @@
 apiVersion: 1
 
+# Grafana veri kaynakları sabit UID ile provision edilir.
+# Sabit UID, dashboard JSON ve datasource bağlantılarının ortamdan ortama bozulmamasını sağlar.
 datasources:
   - name: Prometheus
+    uid: prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090
     isDefault: true
     jsonData:
       httpMethod: POST
+      # Prometheus exemplars içinde trace id varsa doğrudan Tempo trace görünümüne geçilir.
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+        - name: traceID
+          datasourceUid: tempo
 
   - name: Loki
+    uid: loki
     type: loki
     access: proxy
     url: http://loki:3100
+    jsonData:
+      # Log satırında trace_id/traceid görülürse Tempo trace ekranına tek tık bağlantı üretir.
+      # OTLP loglarında trace id structured metadata olarak gelebilir; satırda yoksa Tempo tracesToLogsV2 ana yol olarak çalışır.
+      derivedFields:
+        - name: TraceID
+          datasourceUid: tempo
+          matcherRegex: '(?:trace_id|traceid|TraceId)[=": ]+([A-Fa-f0-9]{32})'
+          url: '$${__value.raw}'
 
   - name: Tempo
+    uid: tempo
     type: tempo
     access: proxy
     url: http://tempo:3200
     jsonData:
       httpMethod: GET
+      # Trace içinden aynı trace id ve servis etiketleriyle Loki loglarına geçiş sağlar.
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: '-5m'
+        spanEndTimeShift: '5m'
+        tags:
+          - key: service.name
+            value: service_name
+          - key: service.name
+            value: job
+        filterByTraceID: true
+        filterBySpanID: false
+      # Trace içinden ilgili servis metriklerine Prometheus sorguları ile geçiş sağlar.
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: '-5m'
+        spanEndTimeShift: '5m'
+        tags:
+          - key: service.name
+            value: job
+        queries:
+          - name: HTTP request rate
+            query: 'sum(rate(http_server_request_duration_seconds_count{job="$${__span.tags.service.name}"}[5m]))'
+          - name: HTTP p95 latency
+            query: 'histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket{job="$${__span.tags.service.name}"}[5m])) by (le))'
+          - name: Process memory
+            query: 'dotnet_process_memory_working_set_bytes{job="$${__span.tags.service.name}"}'
+      # Tempo servis haritası için Prometheus datasource bağlantısı tanımlanır.
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true

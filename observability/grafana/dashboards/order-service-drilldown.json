@@ -1,0 +1,122 @@
+{
+  "uid": "order-service-drilldown",
+  "title": "OrderService — Detail",
+  "description": "OrderService özel dashboardu; REST trafik, hata oranları, latency ve InventoryService gRPC client çağrılarını gösterir.",
+  "tags": ["docker-service-network", "service", "orderservice"],
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "editable": false,
+  "refresh": "30s",
+  "time": { "from": "now-30m", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "type": "constant",
+        "query": "OrderService",
+        "current": { "text": "OrderService", "value": "OrderService" }
+      }
+    ]
+  },
+  "links": [
+    { "title": "Ana dashboard", "type": "link", "url": "/d/docker-service-network-overview/docker-service-network-observability-overview", "includeVars": false, "keepTime": true },
+    { "title": "Explore logs", "type": "link", "url": "/explore?schemaVersion=1&panes=%7B%22left%22:%7B%22datasource%22:%22loki%22,%22queries%22:%5B%7B%22expr%22:%22%7Bservice_name%3D%5C%22OrderService%5C%22%7D%22%7D%5D%7D%7D", "includeVars": false, "keepTime": true }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Health / Active Instance",
+      "description": "OrderService process metriği varsa servis canlıdır.",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "count(dotnet_process_memory_working_set_bytes{job=\"OrderService\"})", "legendFormat": "instances" } ],
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "colorMode": "background", "textMode": "auto" }
+    },
+    {
+      "id": 2,
+      "title": "CPU / Memory",
+      "description": "Runtime kaynak tüketimi; CPU cores rate ve RAM working set birlikte izlenir.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(dotnet_process_cpu_time_seconds_total{job=\"OrderService\"}[5m]))", "legendFormat": "cpu cores" },
+        { "refId": "B", "expr": "dotnet_process_memory_working_set_bytes{job=\"OrderService\"} / 1024 / 1024 / 1024", "legendFormat": "memory GiB" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "title": "REST Request Rate by Route / Status",
+      "description": "OrderService public REST trafiğini route ve status code bazında gösterir.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "sum by (http_route, http_response_status_code) (rate(http_server_request_duration_seconds_count{job=\"OrderService\"}[5m]))", "legendFormat": "{{http_route}} {{http_response_status_code}}" } ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "title": "REST Error Rate",
+      "description": "4xx/5xx ayrımı API sözleşme hataları ile sistem hatalarını hızlı ayırır.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(http_server_request_duration_seconds_count{job=\"OrderService\", http_response_status_code=~\"4..\"}[5m])) or vector(0)", "legendFormat": "4xx" },
+        { "refId": "B", "expr": "sum(rate(http_server_request_duration_seconds_count{job=\"OrderService\", http_response_status_code=~\"5..\"}[5m])) or vector(0)", "legendFormat": "5xx" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "title": "REST Latency p50 / p95 / p99",
+      "description": "Public API response time histogram bucket metriğinden hesaplanır.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum(rate(http_server_request_duration_seconds_bucket{job=\"OrderService\"}[5m])) by (le))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket{job=\"OrderService\"}[5m])) by (le))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum(rate(http_server_request_duration_seconds_bucket{job=\"OrderService\"}[5m])) by (le))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "title": "Inventory gRPC Client Rate / Errors",
+      "description": "OrderService → InventoryService HTTP/gRPC client çağrıları ve downstream hata oranı burada izlenir.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (server_address, http_response_status_code) (rate(http_client_request_duration_seconds_count{job=\"OrderService\"}[5m]))", "legendFormat": "{{server_address}} {{http_response_status_code}}" },
+        { "refId": "B", "expr": "sum(rate(http_client_request_duration_seconds_count{job=\"OrderService\", http_response_status_code=~\"5..\"}[5m])) or vector(0)", "legendFormat": "client 5xx" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "title": "Inventory gRPC Client Latency p95",
+      "description": "Downstream InventoryService latency sorunu API gecikmesinden ayrı görülür.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "histogram_quantile(0.95, sum(rate(http_client_request_duration_seconds_bucket{job=\"OrderService\"}[5m])) by (le, server_address))", "legendFormat": "{{server_address}} p95" } ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "showPoints": "never" } }, "overrides": [] }
+    },
+    {
+      "id": 8,
+      "title": "Recent OrderService Logs",
+      "description": "OrderService logları Loki üzerinden izlenir; log trace id içerirse Tempo bağlantısı görünür.",
+      "type": "logs",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [ { "refId": "A", "expr": "{service_name=\"OrderService\"}", "range": true } ],
+      "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" }
+    }
+  ]
+}

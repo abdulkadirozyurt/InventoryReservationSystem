@@ -179,10 +179,105 @@ InventoryReservationSystem/
 │           ├── OrderService.Application/        # Order lifecycle commands/queries and inventory abstraction
 │           ├── OrderService.Domain/             # Order and OrderHistory aggregates
 │           └── OrderService.Infrastructure/     # Mongo repositories, transactions, health checks, gRPC adapter
-├── test/                                        # Empty (Integration, Unit, and Concurrency tests planned)
+├── test/                                        # Unit tests, Integration tests, k6 stress tests
+│   ├── InventoryService.UnitTests/              # 61 unit tests
+│   ├── OrderService.UnitTests/                  # 4 unit tests
+│   └── InventoryReservationSystem.IntegrationTests/ # 9 integration tests (Testcontainers)
+├── scripts/
+│   ├── stress/                                  # k6 stress test scripts
+│   ├── resilience/                              # Container restart & circuit breaker scenarios
+│   └── verify-inventory-invariants.ps1          # Mathematical consistency verification
 ├── docker-compose.yml                           # Starts services, databases, replica sets, and telemetry
 └── InventoryReservationSystem.slnx              # Modern .NET solution file structure
 ```
+
+---
+
+## Tests & Verification
+
+### Unit Tests
+- **InventoryService.UnitTests**: 61 tests covering reservation logic, expiry handling, stock adjustment, and background services
+- **OrderService.UnitTests**: 4 tests for order analytics and lifecycle
+
+### Integration Tests (9 tests)
+Run with: `dotnet test InventoryReservationSystem.IntegrationTests.csproj`
+
+| Test | Purpose |
+|------|---------|
+| `HealthCheckTests.ReadinessCheck_MongoDbRunning_ShouldBeHealthy` | MongoDB readiness validation |
+| `HealthCheckTests.ReadinessCheck_RedisRunning_ShouldBeHealthy` | Redis readiness validation |
+| `ReserveBatchTests.ReserveBatch_AllSufficientStock_ShouldSucceed` | Atomic batch success |
+| `ReserveBatchTests.ReserveBatch_OneSkuInsufficient_ShouldRollbackAll` | All-or-nothing rollback |
+| `ReserveBatchTests.ReserveBatch_DuplicateIdempotencyKey_ShouldReturnSameReservation` | Idempotency verification |
+| `ConfirmReservationTests.ConfirmReservation_ValidReservation_ShouldDecreaseReservedQuantity` | Confirm flow |
+| `ReleaseBatchTests.ReleaseBatch_CancelReservation_ShouldReleaseStock` | Release flow |
+| `AdjustStockTests.AdjustStock_ValidIncrease_ShouldCreateTransaction` | Audit trail creation |
+| `AdjustStockTests.AdjustStock_DecreaseToNegative_ShouldFail` | Negative stock prevention |
+
+### k6 Stress Tests
+
+| Script | Scenario |
+|--------|----------|
+| `scripts/stress/reservation-concurrency.js` | 100 concurrent VUs, shared SKU pool |
+| `scripts/stress/intersecting-sku-batches.js` | Intersecting batch patterns |
+| `scripts/stress/expiry-pressure.js` | Inventory recycling under TTL pressure |
+| `scripts/stress/idempotency-retry.js` | Duplicate key handling |
+
+Run: `k6 run scripts/stress/reservation-concurrency.js`
+
+### Resilience Verification
+
+| Scenario | Documentation |
+|----------|---------------|
+| Container restart during expiry | `scripts/resilience/restart-during-expiry.md` |
+| Circuit breaker open/close | `scripts/resilience/circuit-breaker-test.md` |
+
+### Inventory Invariant Verifier
+
+PowerShell script verifying mathematical consistency:
+```powershell
+.\scripts\verify-inventory-invariants.ps1
+```
+
+Checks:
+1. No negative quantities
+2. Per-(SKU,WH) ledger match
+3. Rebalance is zero-sum
+4. Pending reservations match reserved quantities
+5. Non-pending reservations don't leak stock
+
+---
+
+## Observability (Faz 6)
+
+The system includes full observability stack via Docker Compose:
+
+| Component | Purpose |
+|-----------|---------|
+| Prometheus 3.7 | Metrics collection (dotnet_*, http_*, inventory_*) |
+| Grafana Loki 3.7 | Log aggregation |
+| Grafana Tempo | Distributed tracing |
+| Grafana 13.0 | Dashboards & alerting |
+| Grafana Alloy 1.17 | OTLP collector |
+
+**Dashboards**:
+- `observability/grafana/dashboards/inventory-reservation-overview.json` — Docker service network overview with health, CPU, memory, request rate, error rate, latency, availability, logs, and telemetry gap notes.
+- `observability/grafana/dashboards/inventory-service-drilldown.json` — InventoryService detail view for reservation, Redis lock, stock adjustment, gRPC/HTTP, and logs.
+- `observability/grafana/dashboards/order-service-drilldown.json` — OrderService detail view for REST traffic, downstream InventoryService client calls, latency, and logs.
+
+**Cross-signal navigation**:
+- Prometheus datasource uses Tempo exemplar trace links when trace IDs are present.
+- Loki datasource uses a Tempo derived field for `trace_id` / `TraceId` log content.
+- Tempo datasource links traces back to Loki logs and Prometheus service metrics.
+- Dashboard links connect the overview and service drilldown dashboards.
+
+**Alerts**:
+- High Lock Contention (>10% failure rate)
+- Rising HTTP 5xx Error Rate (>0.5 req/s)
+- Slow HTTP Latency (p99 >5s)
+- Open Circuit Breaker
+
+Access Grafana: `http://localhost:3000` (admin/admin)
 
 ---
 
@@ -319,17 +414,6 @@ The gRPC API contract is split into five distinct Protobuf files under [src/cont
 
 ---
 
-## Tests
-
-The `test/` directory is currently **empty**. 
-Comprehensive automated testing is planned for **Phase 6** of the roadmap and will include:
-- **Concurrency Integration Tests**: Simulating 100 concurrent requests targeting intersecting SKUs to verify no deadlocks occur and stock allocations remain consistent.
-- **Idempotency Verification**: Validating that repeating an idempotency key multiple times returns the same result without duplicate database mutations.
-- **Rollback Tests**: Simulating failures mid-transaction to verify MongoDB replica-set rollbacks.
-- **Stress Testing**: Using `k6` load scripts to measure system limits, lock contention metrics, and trace performance bottlenecks in Grafana.
-
----
-
 ## What I Learned
 
 During the development of this prototype, several key distributed architecture insights were gained:
@@ -343,9 +427,9 @@ During the development of this prototype, several key distributed architecture i
 
 ## Known Limitations
 
-- **No Automatic Cleanup**: The background worker that expires `Pending` reservations after 10 minutes is defined in the roadmap but has not yet been built. Currently, reservations do not expire automatically.
+- **No Automatic Cleanup**: ~~The background worker that expires `Pending` reservations after 10 minutes is defined in the roadmap but has not yet been built.~~ ✅ **Built** — `ReservationExpiryBackgroundService` expires `Pending` reservations after the configured TTL (default 10 min).
 - **Placeholder Methods**: The advanced operational gRPC operations for rebalancing warehouses and creating/restoring snapshots are currently stubs that return successful response placeholders.
-- **No Tests**: Automated tests are missing and will be introduced in the final roadmap phases.
+- **No Tests**: ~~Automated tests are missing and will be introduced in the final roadmap phases.~~ ✅ **Built** — Integration tests, k6 stress tests, resilience scripts, and an inventory invariant verifier all exist (see Tests & Verification).
 
 ---
 

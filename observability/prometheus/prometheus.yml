@@ -1,6 +1,8 @@
 global:
   scrape_interval: 15s
 
+# Uygulama metrikleri HTTP /metrics scrape modeliyle değil OTLP push modeliyle Alloy'a gider.
+# Alloy, metrikleri Prometheus remote_write endpoint'ine yazar; yanlış /metrics hedefi eklemek No Data/Down target üretir.
 scrape_configs:
   - job_name: prometheus
     static_configs:
