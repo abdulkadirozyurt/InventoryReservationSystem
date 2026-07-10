@@ -3,12 +3,17 @@ import LoadingState from '../components/LoadingState';
 import ErrorBanner from '../components/ErrorBanner';
 import StatTile from '../components/StatTile';
 import { useHealth } from '../hooks/useHealth';
+import { describeError } from '../hooks/useOrders';
+import { errorCodeToUserMessage } from '../utils/errorMessages';
 import { Link } from 'react-router-dom';
 
 export default function HealthPage() {
   const { live, ready, overall, isLoading, error, refetch } = useHealth();
 
-  if (error) return <ErrorBanner message={`Health probe failed: ${error}`} />;
+  if (error) {
+    const { code, message, status } = describeError(error);
+    return <ErrorBanner message={errorCodeToUserMessage(code, status, message)} code={code} />;
+  }
   if (isLoading) return <LoadingState label="Probing backend…" />;
 
   const liveEntries = live?.entries ? Object.entries(live.entries) : [];

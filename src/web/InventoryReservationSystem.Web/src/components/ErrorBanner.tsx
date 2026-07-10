@@ -6,11 +6,8 @@ interface ErrorBannerProps {
 
 export default function ErrorBanner({ message, variant = 'danger', code }: ErrorBannerProps) {
   return (
-    <div className={`banner banner--${variant}`} role="alert">
-      <span>
-        {code && <strong>[{code}] </strong>}
-        {message}
-      </span>
+    <div className={`banner banner--${variant}`} role="alert" title={code ?? undefined}>
+      <span>{message}</span>
     </div>
   );
 }

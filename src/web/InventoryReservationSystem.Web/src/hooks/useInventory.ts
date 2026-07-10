@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { inventoryApi } from '../api/inventory';
 import type {
@@ -32,32 +32,52 @@ export function useStockLookup(sku: string, warehouseId?: string, enabled = fals
 }
 
 export function useIncreaseStock() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: StockAdjustmentRequest) => inventoryApi.increase(body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: inventoryKeys.all });
+    },
   });
 }
 
 export function useDecreaseStock() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: StockAdjustmentRequest) => inventoryApi.decrease(body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: inventoryKeys.all });
+    },
   });
 }
 
 export function useTransferStock() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: TransferStockRequest) => inventoryApi.transfer(body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: inventoryKeys.all });
+    },
   });
 }
 
 export function useCreateSnapshot() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: CreateSnapshotRequest) => inventoryApi.createSnapshot(body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: inventoryKeys.all });
+    },
   });
 }
 
 export function useRestoreSnapshot() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (payload: { snapshotId: string; body: RestoreSnapshotRequest }) =>
       inventoryApi.restoreSnapshot(payload.snapshotId, payload.body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: inventoryKeys.all });
+    },
   });
 }

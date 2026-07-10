@@ -281,6 +281,49 @@ a:hover { text-decoration: underline; }
 .bulk-action-bar label { display: flex; flex-direction: column; gap: 0.25rem; color: var(--text-muted); font-size: 0.8rem; min-width: 220px; }
 .bulk-action-bar input { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 0.4rem 0.55rem; font: inherit; }
 
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex; align-items: center; justify-content: center;
+}
+
+.modal {
+  background: var(--surface); border-radius: var(--radius); max-width: 500px; width: 90%;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header { padding: 1.5rem; border-bottom: 1px solid var(--border); }
+.modal-header h2 { margin: 0; font-size: 1.25rem; }
+
+.modal-body { padding: 1.5rem; }
+.modal-body p { margin: 0; line-height: 1.5; }
+
+.modal-footer { padding: 1.5rem; border-top: 1px solid var(--border); display: flex; gap: 0.75rem; justify-content: flex-end; }
+.modal-footer .btn { margin: 0; }
+
+.toast-stack {
+  position: fixed; right: 1rem; bottom: 1rem; z-index: 200;
+  display: flex; flex-direction: column; gap: 0.5rem;
+  max-width: min(360px, calc(100vw - 2rem));
+}
+
+.toast {
+  padding: 0.75rem 1rem; border-radius: var(--radius);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
+  color: #fff; font-size: 0.9rem; line-height: 1.4;
+  cursor: pointer; border: 1px solid transparent;
+  animation: toast-in 0.15s ease-out;
+}
+
+.toast--success { background: #15803d; border-color: #166534; }
+.toast--error { background: #b91c1c; border-color: #991b1b; }
+.toast--info { background: #1d4ed8; border-color: #1e40af; }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @media (max-width: 900px) {
   .app-shell { display: flex; flex-direction: column; }
   .app-shell__sidebar { min-height: auto; position: sticky; z-index: 10; border-right: none; border-bottom: 1px solid var(--border); }

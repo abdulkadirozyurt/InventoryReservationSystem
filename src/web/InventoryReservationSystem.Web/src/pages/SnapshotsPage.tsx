@@ -1,18 +1,23 @@
 import { FormEvent, useState } from 'react';
 
 import Card from '../components/Card';
+import ConfirmDialog from '../components/ConfirmDialog';
 import ErrorBanner from '../components/ErrorBanner';
 import { useCreateSnapshot, useRestoreSnapshot } from '../hooks/useInventory';
 import { describeError } from '../hooks/useOrders';
+import { errorCodeToUserMessage } from '../utils/errorMessages';
+import { useToast } from '../hooks/useToast';
 
 export default function SnapshotsPage() {
   const [requestedBy, setRequestedBy] = useState('demo-operator');
   const [snapshotId, setSnapshotId] = useState('');
   const [validation, setValidation] = useState<string | null>(null);
+  const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false);
   const createM = useCreateSnapshot();
   const restoreM = useRestoreSnapshot();
   const createErr = createM.error ? describeError(createM.error) : null;
   const restoreErr = restoreM.error ? describeError(restoreM.error) : null;
+  const { notify } = useToast();
 
   function createSnapshot(event: FormEvent) {
     event.preventDefault();
@@ -22,18 +27,30 @@ export default function SnapshotsPage() {
     createM.mutate({ requestedBy: operator }, {
       onSuccess: (result) => {
         if (result.snapshotId) setSnapshotId(result.snapshotId);
+        if (result.success) notify('success', 'Snapshot oluşturuldu');
       },
     });
   }
 
-  function restoreSnapshot(event: FormEvent) {
-    event.preventDefault();
+  function confirmRestore() {
     const operator = requestedBy.trim();
     const id = snapshotId.trim();
     if (!id) return setValidation('Snapshot ID is required for restore.');
     if (!operator) return setValidation('Requested by is required.');
     setValidation(null);
-    restoreM.mutate({ snapshotId: id, body: { requestedBy: operator } });
+    setRestoreConfirmOpen(true);
+  }
+
+  function doRestore() {
+    restoreM.mutate(
+      { snapshotId: snapshotId.trim(), body: { requestedBy: requestedBy.trim() } },
+      {
+        onSuccess: (result) => {
+          if (result.success) notify('success', 'Snapshot geri yüklendi');
+        },
+      },
+    );
+    setRestoreConfirmOpen(false);
   }
 
   return (
@@ -48,8 +65,8 @@ export default function SnapshotsPage() {
       </section>
 
       {validation && <ErrorBanner message={validation} variant="warning" />}
-      {createErr && <ErrorBanner message={createErr.message} code={createErr.code} />}
-      {restoreErr && <ErrorBanner message={restoreErr.message} code={restoreErr.code} />}
+      {createErr && <ErrorBanner message={errorCodeToUserMessage(createErr.code, createErr.status, createErr.message)} code={createErr.code} />}
+      {restoreErr && <ErrorBanner message={errorCodeToUserMessage(restoreErr.code, restoreErr.status, restoreErr.message)} code={restoreErr.code} />}
 
       <div className="split">
         <Card title="Create snapshot" subtitle="Capture current inventory state.">
@@ -60,7 +77,7 @@ export default function SnapshotsPage() {
             </label>
             <div className="form-actions form-actions--end">
               <button className="btn btn--primary" type="submit" disabled={createM.isPending}>
-                {createM.isPending ? 'Creating…' : 'Create snapshot'}
+                {createM.isPending ? 'Oluşturuluyor…' : 'Create snapshot'}
               </button>
             </div>
           </form>
@@ -69,13 +86,13 @@ export default function SnapshotsPage() {
             <div className="result-panel">
               <strong>{createM.data.success ? 'Snapshot created' : 'Snapshot failed'}</strong>
               {createM.data.snapshotId && <span>Snapshot ID: <code>{createM.data.snapshotId}</code></span>}
-              {createM.data.errorMessage && <span>{createM.data.errorCode}: {createM.data.errorMessage}</span>}
+              {createM.data.errorMessage && <span>{errorCodeToUserMessage(createM.data.errorCode ?? 'Error', 0, createM.data.errorMessage)}</span>}
             </div>
           )}
         </Card>
 
         <Card title="Restore snapshot" subtitle="Restore by explicit snapshot ID.">
-          <form className="form-grid form-grid--single" onSubmit={restoreSnapshot}>
+          <form className="form-grid form-grid--single" onSubmit={confirmRestore}>
             <label>
               Snapshot ID
               <input value={snapshotId} onChange={(e) => setSnapshotId(e.target.value)} placeholder="snapshot id" />
@@ -86,7 +103,7 @@ export default function SnapshotsPage() {
             </label>
             <div className="form-actions form-actions--end">
               <button className="btn btn--danger" type="submit" disabled={restoreM.isPending}>
-                {restoreM.isPending ? 'Restoring…' : 'Restore snapshot'}
+                {restoreM.isPending ? 'Geri yükleniyor…' : 'Restore snapshot'}
               </button>
             </div>
           </form>
@@ -95,12 +112,24 @@ export default function SnapshotsPage() {
             <div className="result-panel">
               <strong>{restoreM.data.success ? 'Restore completed' : 'Restore failed'}</strong>
               {restoreM.data.errorMessage
-                ? <span>{restoreM.data.errorCode}: {restoreM.data.errorMessage}</span>
+                ? <span>{errorCodeToUserMessage(restoreM.data.errorCode ?? 'Error', 0, restoreM.data.errorMessage)}</span>
                 : <span>InventoryService accepted the restore request.</span>}
             </div>
           )}
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={restoreConfirmOpen}
+        title="Restore inventory snapshot"
+        message="This will overwrite the current inventory state with the selected snapshot. Are you sure?"
+        confirmLabel="Restore"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={doRestore}
+        onCancel={() => setRestoreConfirmOpen(false)}
+        busy={restoreM.isPending}
+      />
     </div>
   );
 }

@@ -144,7 +144,7 @@ export default function HomePage() {
 
       <Card title="Recent orders" subtitle="Newest orders returned by OrderService.">
         {recent.length === 0 ? (
-          <p className="empty">No recent orders. Create an order to test the reservation flow.</p>
+          <p className="empty">Henüz sipariş yok</p>
         ) : (
           <table className="data-table">
             <thead>

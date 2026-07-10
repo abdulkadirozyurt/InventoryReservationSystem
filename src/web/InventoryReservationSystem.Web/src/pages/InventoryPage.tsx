@@ -5,12 +5,14 @@ import ErrorBanner from "../components/ErrorBanner";
 import LoadingState from "../components/LoadingState";
 import StatTile from "../components/StatTile";
 import { describeError } from "../hooks/useOrders";
+import { errorCodeToUserMessage } from "../utils/errorMessages";
 import {
   useDecreaseStock,
   useIncreaseStock,
   useInventoryCatalogue,
   useStockLookup,
 } from "../hooks/useInventory";
+import { useToast } from "../hooks/useToast";
 
 type AdjustmentMode = "increase" | "decrease";
 
@@ -18,10 +20,13 @@ export default function InventoryPage() {
   const catalogueQ = useInventoryCatalogue();
   const catalogue = catalogueQ.data;
   const skuOptions = [...new Set((catalogue ?? []).map((c) => c.sku))].sort();
-  const warehouseOptions = [
-    ...new Set((catalogue ?? []).map((c) => c.warehouseId)),
-  ].sort();
 
+  const getWarehouseOptionsForSku = (selectedSku: string) => {
+    if (!selectedSku || !catalogue) return [];
+    return [...new Set(catalogue.filter(c => c.sku === selectedSku).map(c => c.warehouseId))].sort();
+  };
+
+  const [tableFilter, setTableFilter] = useState("");
   const [sku, setSku] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
   const [lookup, setLookup] = useState<{
@@ -40,6 +45,7 @@ export default function InventoryPage() {
   );
   const stock = stockQ.data;
 
+  const { notify } = useToast();
   const increaseM = useIncreaseStock();
   const decreaseM = useDecreaseStock();
   const activeMutation = mode === "increase" ? increaseM : decreaseM;
@@ -64,26 +70,77 @@ export default function InventoryPage() {
       warehouseId,
       quantity: adjQty,
       reason: adjReason || "Manual adjustment",
+    }, {
+      onSuccess: (resp) => {
+        if (resp.success) notify('success', 'Stok güncellendi');
+      },
     });
   }
 
   if (catalogueQ.isLoading)
     return <LoadingState label="Loading inventory catalogue…" />;
 
+  const filteredCatalogue = (catalogue ?? []).filter((c) => {
+    if (!tableFilter.trim()) return true;
+    const needle = tableFilter.trim().toLowerCase();
+    return c.sku.toLowerCase().includes(needle) || c.warehouseId.toLowerCase().includes(needle);
+  }).sort((a, b) => a.sku.localeCompare(b.sku) || a.warehouseId.localeCompare(b.warehouseId));
+
   return (
     <div className="page">
       <h1>Inventory</h1>
 
       {validation && <ErrorBanner message={validation} variant="warning" />}
-      {stockQ.error && (
-        <ErrorBanner
-          message={describeError(stockQ.error).message}
-          code={describeError(stockQ.error).code}
-        />
-      )}
+      {stockQ.error && (() => {
+        const { code, message, status } = describeError(stockQ.error);
+        return <ErrorBanner message={errorCodeToUserMessage(code, status, message)} code={code} />;
+      })()}
       {mutationError && (
-        <ErrorBanner message={mutationError.message} code={mutationError.code} />
+        <ErrorBanner message={errorCodeToUserMessage(mutationError.code, mutationError.status, mutationError.message)} code={mutationError.code} />
       )}
+
+      <Card title="All stock" subtitle={`${filteredCatalogue.length} of ${catalogue?.length ?? 0} SKU/warehouse records`}>
+        <div className="form-grid" style={{ marginBottom: '0.75rem' }}>
+          <label style={{ flex: 1, minWidth: 220 }}>
+            Filter by SKU or warehouse
+            <input
+              type="text"
+              value={tableFilter}
+              onChange={(e) => setTableFilter(e.target.value)}
+              placeholder="e.g. SKU-001 or WH-1"
+            />
+          </label>
+        </div>
+
+        {filteredCatalogue.length === 0 ? (
+          <p className="empty">
+            {catalogue && catalogue.length > 0 ? 'Filtreye uyan stok kaydı yok' : 'Henüz stok kaydı yok'}
+          </p>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>SKU</th>
+                <th>Warehouse</th>
+                <th>Available</th>
+                <th>Reserved</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredCatalogue.map((c) => (
+                <tr key={`${c.sku}-${c.warehouseId}`}>
+                  <td><code>{c.sku}</code></td>
+                  <td>{c.warehouseId}</td>
+                  <td>{c.quantityAvailable}</td>
+                  <td>{c.quantityReserved}</td>
+                  <td>{c.quantityAvailable + c.quantityReserved}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
 
       <Card title="Stock lookup">
         <form className="form-grid" onSubmit={doLookup}>
@@ -103,9 +160,10 @@ export default function InventoryPage() {
             <select
               value={warehouseId}
               onChange={(e) => setWarehouseId(e.target.value)}
+              disabled={!sku}
             >
-              <option value="">All warehouses</option>
-              {warehouseOptions.map((w) => (
+              <option value=""> {sku ? 'All warehouses' : 'Select SKU first'}</option>
+              {getWarehouseOptionsForSku(sku).map((w) => (
                 <option key={w} value={w}>
                   {w}
                 </option>
@@ -126,11 +184,11 @@ export default function InventoryPage() {
           </div>
         )}
         {stock && !stock.found && !stock.errorMessage && (
-          <p>No stock record found for that SKU / warehouse.</p>
+          <p>Bu SKU-depo kombinasyonu için stok kaydı yok</p>
         )}
         {stock?.errorMessage && (
           <ErrorBanner
-            message={stock.errorMessage}
+            message={errorCodeToUserMessage(stock.errorCode ?? 'Error', 0, stock.errorMessage)}
             code={stock.errorCode ?? undefined}
             variant="warning"
           />
@@ -139,6 +197,20 @@ export default function InventoryPage() {
 
       <Card title="Stock adjustment">
         <div className="form-grid">
+          <label>
+            SKU
+            <select value={sku} onChange={(e) => setSku(e.target.value)}>
+              <option value="">-- Select SKU --</option>
+              {skuOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+          <label>
+            Warehouse
+            <select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} disabled={!sku}>
+              <option value="">{sku ? '-- Select warehouse --' : 'Select SKU first'}</option>
+              {getWarehouseOptionsForSku(sku).map((w) => <option key={w} value={w}>{w}</option>)}
+            </select>
+          </label>
           <label>
             Direction
             <select
@@ -172,7 +244,7 @@ export default function InventoryPage() {
             disabled={activeMutation.isPending}
             onClick={doAdjust}
           >
-            {activeMutation.isPending ? "Saving…" : "Apply adjustment"}
+            {activeMutation.isPending ? "İşleniyor…" : "Apply adjustment"}
           </button>
         </div>
 
@@ -185,8 +257,7 @@ export default function InventoryPage() {
             </strong>
             {activeMutation.data.errorMessage && (
               <span>
-                {activeMutation.data.errorCode}:{" "}
-                {activeMutation.data.errorMessage}
+                {errorCodeToUserMessage(activeMutation.data.errorCode ?? 'Error', 0, activeMutation.data.errorMessage)}
               </span>
             )}
           </div>

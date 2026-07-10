@@ -11,6 +11,8 @@ import {
   useOrderList,
   describeError,
 } from '../hooks/useOrders';
+import { errorCodeToUserMessage } from '../utils/errorMessages';
+import { useToast } from '../hooks/useToast';
 import type {
   BulkCancelOrdersResponse,
   ListOrdersQuery,
@@ -46,12 +48,13 @@ export default function OrdersPage() {
 
   const listQ = useOrderList(query);
   const bulkM = useBulkCancel();
+  const { notify } = useToast();
 
   const orders: Order[] = listQ.data ?? [];
 
   if (listQ.error) {
-    const { code, message } = describeError(listQ.error);
-    return <ErrorBanner message={message} code={code} />;
+    const { code, message, status } = describeError(listQ.error);
+    return <ErrorBanner message={errorCodeToUserMessage(code, status, message)} code={code} />;
   }
   if (listQ.isLoading) return <LoadingState label="Loading orders…" />;
 
@@ -91,6 +94,7 @@ export default function OrdersPage() {
           setResult(resp);
           setSelected({});
           setReason('');
+          notify('success', 'Seçili siparişler iptal edildi');
           void listQ.refetch();
         },
       },
@@ -164,7 +168,7 @@ export default function OrdersPage() {
         </div>
 
         {orders.length === 0 ? (
-          <p className="empty">No orders match the current filter.</p>
+          <p className="empty">Filtrelere uyan sipariş bulunamadı</p>
         ) : (
           <table className="data-table">
             <thead>
@@ -246,7 +250,6 @@ export default function OrdersPage() {
               <tr>
                 <th>Order #</th>
                 <th>Success</th>
-                <th>Code</th>
                 <th>Message</th>
               </tr>
             </thead>
@@ -255,7 +258,6 @@ export default function OrdersPage() {
                 <tr key={r.orderNumber}>
                   <td><code>{r.orderNumber}</code></td>
                   <td>{r.success ? 'Yes' : 'No'}</td>
-                  <td>{r.errorCode ?? '—'}</td>
                   <td>{r.errorMessage ?? '—'}</td>
                 </tr>
               ))}
@@ -286,7 +288,7 @@ function PerRowCancel({ orderNumber, onDone }: { orderNumber: string; onDone: ()
             },
           );
         }}
-      >{m.isPending ? '…' : 'Cancel'}</button>
+      >{m.isPending ? 'İptal ediliyor…' : 'Cancel'}</button>
       {err && <span className="inline-error" title={err}>!</span>}
     </>
   );

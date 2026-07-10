@@ -5,7 +5,9 @@ import Card from '../components/Card';
 import ErrorBanner from '../components/ErrorBanner';
 import LoadingState from '../components/LoadingState';
 import { useCreateOrder, describeError } from '../hooks/useOrders';
+import { errorCodeToUserMessage } from '../utils/errorMessages';
 import { useInventoryCatalogue } from '../hooks/useInventory';
+import { useToast } from '../hooks/useToast';
 import type { CreateOrderItemRequest } from '../types/orders';
 
 interface RowDraft extends CreateOrderItemRequest {
@@ -30,14 +32,30 @@ export default function CreateOrderPage() {
   const [idemKey] = useState<string>(genIdempotencyKey());
   const [validationError, setValidationError] = useState<string | null>(null);
   const createM = useCreateOrder();
+  const { notify } = useToast();
 
   const catalogueQ = useInventoryCatalogue();
   const catalogue = catalogueQ.data;
   const skuOptions = [...new Set((catalogue ?? []).map(c => c.sku))].sort();
-  const warehouseOptions = [...new Set((catalogue ?? []).map(c => c.warehouseId))].sort();
+
+  function getWarehouseOptionsForSku(sku: string): string[] {
+    if (!sku || !catalogue) return [];
+    return [...new Set(catalogue.filter(c => c.sku === sku && c.quantityAvailable > 0).map(c => c.warehouseId))].sort();
+  }
 
   function updateRow(key: string, patch: Partial<RowDraft>) {
-    setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+    setRows((prev) => prev.map((r) => {
+      if (r.key !== key) return r;
+      const updated = { ...r, ...patch };
+      // If SKU changed and current warehouse is not in new options, clear it
+      if (patch.sku !== undefined && updated.sku !== r.sku) {
+        const newWarehouses = getWarehouseOptionsForSku(updated.sku);
+        if (!newWarehouses.includes(updated.warehouseId)) {
+          updated.warehouseId = '';
+        }
+      }
+      return updated;
+    }));
   }
   function addRow() {
     setRows((prev) => [...prev, makeRow()]);
@@ -67,6 +85,7 @@ export default function CreateOrderPage() {
       {
         onSuccess: (resp) => {
           if (resp.success && resp.orderNumber) {
+            notify('success', 'Sipariş oluşturuldu');
             nav(`/orders/${encodeURIComponent(resp.orderNumber)}`);
           }
         },
@@ -85,13 +104,13 @@ export default function CreateOrderPage() {
         subtitle="All-or-nothing multi-SKU reservation. Idempotency-Key is generated per request — retry safely."
       >
         {validationError && <ErrorBanner message={validationError} variant="warning" />}
-        {err && <ErrorBanner message={err.message} code={err.code} />}
+        {err && <ErrorBanner message={errorCodeToUserMessage(err.code, err.status, err.message)} code={err.code} />}
         {createM.data && !createM.data.success && createM.data.failures.length > 0 && (
           <Card title="Partial failures">
             <ul className="failure-list">
               {createM.data.failures.map((f, i) => (
                 <li key={i}>
-                  <code>{f.sku}</code> @ <code>{f.warehouseId}</code> — <strong>{f.errorCode}</strong>: {f.reason}
+                  <code>{f.sku}</code> @ <code>{f.warehouseId}</code> — {f.reason}
                 </li>
               ))}
             </ul>
@@ -124,9 +143,10 @@ export default function CreateOrderPage() {
                   <select
                     value={r.warehouseId}
                     onChange={(e) => updateRow(r.key, { warehouseId: e.target.value })}
+                    disabled={!r.sku}
                   >
-                    <option value="">-- Warehouse --</option>
-                    {warehouseOptions.map(w => <option key={w} value={w}>{w}</option>)}
+                    <option value="">{r.sku ? '-- Select warehouse --' : 'Select SKU first'}</option>
+                    {getWarehouseOptionsForSku(r.sku).map(w => <option key={w} value={w}>{w}</option>)}
                   </select>
                 </td>
                 <td style={{ minWidth: 80 }}>

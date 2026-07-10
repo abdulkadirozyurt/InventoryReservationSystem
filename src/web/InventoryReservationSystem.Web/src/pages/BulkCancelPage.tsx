@@ -1,8 +1,11 @@
 import { useMemo, useState } from 'react';
 
 import Card from '../components/Card';
+import ConfirmDialog from '../components/ConfirmDialog';
 import ErrorBanner from '../components/ErrorBanner';
 import { useBulkCancel, useOrderList, describeError } from '../hooks/useOrders';
+import { errorCodeToUserMessage } from '../utils/errorMessages';
+import { useToast } from '../hooks/useToast';
 import StatusBadge from '../components/StatusBadge';
 import { Link } from 'react-router-dom';
 import type { ListOrdersQuery, OrderStatus } from '../types/orders';
@@ -18,11 +21,14 @@ export default function BulkCancelPage() {
   const [rawText, setRawText] = useState('');
   const [reason, setReason] = useState('');
   const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<'text' | 'selected'>('text');
 
   const listQ = useOrderList(
     useMemo<ListOrdersQuery>(() => ({ status: 'Pending' as OrderStatus }), []),
   );
   const bulkM = useBulkCancel();
+  const { notify } = useToast();
 
   const pendingOrders = listQ.data ?? [];
   const selectedNumbers = Object.entries(selected)
@@ -48,28 +54,43 @@ export default function BulkCancelPage() {
       setRawText('');
       return;
     }
-    bulkM.mutate(
-      { orderNumbers: Array.from(new Set(ids)), reason: reason || undefined },
-      {
-        onSuccess: () => {
-          setRawText('');
-          void listQ.refetch();
-        },
-      },
-    );
+    setConfirmAction('text');
+    setConfirmOpen(true);
   }
 
   function submitSelected() {
     if (selectedNumbers.length === 0) return;
-    bulkM.mutate(
-      { orderNumbers: Array.from(new Set(selectedNumbers)), reason: reason || undefined },
-      {
-        onSuccess: () => {
-          clearSelection();
-          void listQ.refetch();
+    setConfirmAction('selected');
+    setConfirmOpen(true);
+  }
+
+  function doConfirmedCancel() {
+    if (confirmAction === 'text') {
+      const ids = parseLines(rawText);
+      bulkM.mutate(
+        { orderNumbers: Array.from(new Set(ids)), reason: reason || undefined },
+        {
+          onSuccess: () => {
+            setRawText('');
+            notify('success', 'Toplu iptal tamamlandı');
+            void listQ.refetch();
+            setConfirmOpen(false);
+          },
         },
-      },
-    );
+      );
+    } else {
+      bulkM.mutate(
+        { orderNumbers: Array.from(new Set(selectedNumbers)), reason: reason || undefined },
+        {
+          onSuccess: () => {
+            clearSelection();
+            notify('success', 'Toplu iptal tamamlandı');
+            void listQ.refetch();
+            setConfirmOpen(false);
+          },
+        },
+      );
+    }
   }
 
   const err = bulkM.error ? describeError(bulkM.error) : null;
@@ -87,7 +108,7 @@ export default function BulkCancelPage() {
           <Link to="/orders">Orders</Link> page. This page stays for paste-by-list or
           pick-from-pending workflows.
         </p>
-        {err && <ErrorBanner message={err.message} code={err.code} />}
+        {err && <ErrorBanner message={errorCodeToUserMessage(err.code, err.status, err.message)} code={err.code} />}
 
         <label className="row">
           <span>Cancellation reason (optional, applies to all)</span>
@@ -166,7 +187,6 @@ export default function BulkCancelPage() {
               <tr>
                 <th>Order #</th>
                 <th>Success</th>
-                <th>Code</th>
                 <th>Message</th>
               </tr>
             </thead>
@@ -175,7 +195,6 @@ export default function BulkCancelPage() {
                 <tr key={r.orderNumber}>
                   <td><code>{r.orderNumber}</code></td>
                   <td>{r.success ? 'Yes' : 'No'}</td>
-                  <td>{r.errorCode ?? '—'}</td>
                   <td>{r.errorMessage ?? '—'}</td>
                 </tr>
               ))}
@@ -183,6 +202,18 @@ export default function BulkCancelPage() {
           </table>
         </Card>
       )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Cancel orders"
+        message={`Cancel ${confirmAction === 'text' ? parseLines(rawText).length : selectedNumbers.length} order(s)? This action is idempotent.`}
+        confirmLabel="Cancel orders"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={doConfirmedCancel}
+        onCancel={() => setConfirmOpen(false)}
+        busy={bulkM.isPending}
+      />
     </div>
   );
 }

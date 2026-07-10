@@ -11,6 +11,8 @@ import {
   useOrder,
   describeError,
 } from '../hooks/useOrders';
+import { errorCodeToUserMessage } from '../utils/errorMessages';
+import { useToast } from '../hooks/useToast';
 
 export default function OrderDetailPage() {
   const { orderNumber = '' } = useParams<{ orderNumber: string }>();
@@ -18,6 +20,7 @@ export default function OrderDetailPage() {
   const confirmM = useConfirmOrder(orderNumber);
   const cancelM = useCancelOrder(orderNumber);
   const [cancelReason, setCancelReason] = useState('');
+  const { notify } = useToast();
 
   if (orderQ.isLoading) return <LoadingState label={`Loading ${orderNumber}…`} />;
   if (orderQ.error) {
@@ -25,7 +28,7 @@ export default function OrderDetailPage() {
     if (status === 404 || code === 'HttpError' && message.toLowerCase().includes('not found')) {
       return <ErrorBanner message={`Order ${orderNumber} not found.`} code={code} variant="warning" />;
     }
-    return <ErrorBanner message={message} code={code} />;
+    return <ErrorBanner message={errorCodeToUserMessage(code, status, message)} code={code} />;
   }
 
   const order = orderQ.data;
@@ -88,14 +91,17 @@ export default function OrderDetailPage() {
               className="btn btn--primary"
               disabled={!canConfirm || confirmM.isPending}
               onClick={() => confirmM.mutate(undefined, {
+                onSuccess: (resp) => {
+                  if (resp.success) notify('success', 'Sipariş onaylandı');
+                },
                 onError: (e) => { void e; /* surfaced via confirmErr */ },
               })}
             >
-              {confirmM.isPending ? 'Confirming…' : canConfirm ? 'Confirm order' : 'Already ' + order.status}
+              {confirmM.isPending ? 'Onaylanıyor…' : canConfirm ? 'Confirm order' : 'Already ' + order.status}
             </button>
-            {confirmErr && <ErrorBanner message={confirmErr.message} code={confirmErr.code} variant="warning" />}
+            {confirmErr && <ErrorBanner message={errorCodeToUserMessage(confirmErr.code, confirmErr.status, confirmErr.message)} code={confirmErr.code} variant="warning" />}
             {confirmM.data && !confirmM.data.success && (
-              <ErrorBanner message={confirmM.data.errorMessage ?? 'Confirm refused'} code={confirmM.data.errorCode ?? 'Refused'} />
+              <ErrorBanner message={errorCodeToUserMessage(confirmM.data.errorCode ?? 'Refused', 0, confirmM.data.errorMessage ?? 'Confirm refused')} code={confirmM.data.errorCode ?? 'Refused'} />
             )}
           </div>
 
@@ -112,13 +118,17 @@ export default function OrderDetailPage() {
             <button
               className="btn btn--danger"
               disabled={!canCancel || cancelM.isPending}
-              onClick={() => cancelM.mutate({ reason: cancelReason || undefined })}
+              onClick={() => cancelM.mutate({ reason: cancelReason || undefined }, {
+                onSuccess: (resp) => {
+                  if (resp.success) notify('success', 'Sipariş iptal edildi');
+                },
+              })}
             >
-              {cancelM.isPending ? 'Cancelling…' : canCancel ? 'Cancel order' : 'Cannot cancel from ' + order.status}
+              {cancelM.isPending ? 'İptal ediliyor…' : canCancel ? 'Cancel order' : 'Cannot cancel from ' + order.status}
             </button>
-            {cancelErr && <ErrorBanner message={cancelErr.message} code={cancelErr.code} variant="warning" />}
+            {cancelErr && <ErrorBanner message={errorCodeToUserMessage(cancelErr.code, cancelErr.status, cancelErr.message)} code={cancelErr.code} variant="warning" />}
             {cancelM.data && !cancelM.data.success && (
-              <ErrorBanner message={cancelM.data.errorMessage ?? 'Cancel refused'} code={cancelM.data.errorCode ?? 'Refused'} />
+              <ErrorBanner message={errorCodeToUserMessage(cancelM.data.errorCode ?? 'Refused', 0, cancelM.data.errorMessage ?? 'Cancel refused')} code={cancelM.data.errorCode ?? 'Refused'} />
             )}
           </div>
         </div>
