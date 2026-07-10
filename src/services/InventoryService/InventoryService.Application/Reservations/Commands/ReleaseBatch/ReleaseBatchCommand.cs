@@ -5,8 +5,11 @@ public sealed record ReleaseBatchCommand(
     IReadOnlyCollection<ReleaseBatchItemCommand> Items,
     string CorrelationId,
     // IsExpiry=true => background expiry job çağırdı, reservation Expired state'e geçer, audit "Expired" yazılır.
-    // IsExpiry=false => normal client release (cancel/manual), reservation Released state'e geçer, audit "Released" yazılır.
-    bool IsExpiry = false);
+    // IsExpiry=false => normal client/admin release, reservation Released state'e geçer.
+    // Admin override reason/requestedBy audit reason içine taşınır; stok doğrudan elle mutate edilmez.
+    bool IsExpiry = false,
+    string? Reason = null,
+    string? RequestedBy = null);
 
 public sealed record ReleaseBatchItemCommand(
     string Sku,

@@ -22,6 +22,9 @@ message ReserveBatchRequest {
   // Burada request içinde birden fazla ReservationItem gönderilebilir.
   // Bu yüzden metot adı ReserveBatch: tek ürün değil, ürün listesi rezerve eder.
   repeated ReservationItem items = 3;
+
+  // enable_fallback: true olduğunda eksik stok aynı SKU'nun alternatif depolarından karşılanabilir.
+  bool enable_fallback = 4;
 }
 
 // ReserveBatchResponse: Toplu rezervasyon isteğinin sonucu.
@@ -68,6 +71,22 @@ message ConfirmReservationRequest {
 
 // ConfirmReservationResponse: Confirm işleminin sonucu.
 message ConfirmReservationResponse {
+  ResponseMetadata metadata = 1;
+  bool success = 2;
+  string error_code = 3;
+  string error_message = 4;
+}
+
+// AdminReleaseReservationRequest: Admin tarafından bir rezervasyonun zorla serbest bırakılması isteği.
+message AdminReleaseReservationRequest {
+  RequestMetadata metadata = 1;
+  string reservation_id = 2;
+  string reason = 3;
+  string requested_by = 4;
+}
+
+// AdminReleaseReservationResponse: Admin release işleminin sonucu.
+message AdminReleaseReservationResponse {
   ResponseMetadata metadata = 1;
   bool success = 2;
   string error_code = 3;

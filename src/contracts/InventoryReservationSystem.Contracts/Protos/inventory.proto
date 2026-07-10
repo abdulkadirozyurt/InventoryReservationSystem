@@ -46,4 +46,7 @@ service InventoryReservations {
   rpc RebalanceWarehouse (RebalanceWarehouseRequest) returns (RebalanceWarehouseResponse);
   rpc CreateInventorySnapshot (CreateInventorySnapshotRequest) returns (CreateInventorySnapshotResponse);
   rpc RestoreInventorySnapshot (RestoreInventorySnapshotRequest) returns (RestoreInventorySnapshotResponse);
+
+  // AdminReleaseReservation: Admin tarafından stuck/pending rezervasyonu güvenli ReleaseBatch semantiğiyle serbest bırakır.
+  rpc AdminReleaseReservation (AdminReleaseReservationRequest) returns (AdminReleaseReservationResponse);
 }

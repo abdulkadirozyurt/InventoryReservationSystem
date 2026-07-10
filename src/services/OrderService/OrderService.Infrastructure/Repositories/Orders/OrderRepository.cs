@@ -184,4 +184,64 @@ public sealed class OrderRepository(
             throw new OrderStoreUnavailableException("Order store is unavailable while updating order", exception);
         }
     }
+
+    public async Task<IReadOnlyList<Order>> ListDetailedAsync(
+        DateTime from,
+        DateTime to,
+        string? sku,
+        string? warehouseId,
+        OrderStatus? status,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var builder = Builders<Order>.Filter;
+            var filter = builder.Gte(order => order.CreatedAt, from) & builder.Lte(order => order.CreatedAt, to);
+
+            if (status.HasValue)
+            {
+                filter &= builder.Eq(order => order.Status, status.Value);
+            }
+
+            // Filter by SKU and/or WarehouseId if provided
+            if (!string.IsNullOrEmpty(sku) && !string.IsNullOrEmpty(warehouseId))
+            {
+                var itemBuilder = Builders<OrderLineItem>.Filter;
+                filter &= builder.ElemMatch(
+                    order => order.Items,
+                    itemBuilder.Eq(item => item.Sku, sku) & itemBuilder.Eq(item => item.WarehouseId, warehouseId));
+            }
+            else if (!string.IsNullOrEmpty(sku))
+            {
+                filter &= builder.ElemMatch(order => order.Items, Builders<OrderLineItem>.Filter.Eq(item => item.Sku, sku));
+            }
+            else if (!string.IsNullOrEmpty(warehouseId))
+            {
+                filter &= builder.ElemMatch(order => order.Items, Builders<OrderLineItem>.Filter.Eq(item => item.WarehouseId, warehouseId));
+            }
+
+            var session = mongoSessionProvider.CurrentSession;
+
+            if (session is not null)
+            {
+                return await _collection.Find(session, filter).ToListAsync(cancellationToken);
+            }
+
+            return await _collection.Find(filter).ToListAsync(cancellationToken);
+        }
+        catch (MongoException exception)
+        {
+            logger.LogError(
+                exception,
+                "MongoDB failed while listing detailed orders. From: {From}, To: {To}, Sku: {Sku}, WarehouseId: {WarehouseId}, Status: {Status}, ErrorCategory: {ErrorCategory}",
+                from,
+                to,
+                sku,
+                warehouseId,
+                status,
+                "TransientMongoError");
+
+            throw new OrderStoreUnavailableException("Order store is unavailable while listing detailed orders", exception);
+        }
+    }
 }

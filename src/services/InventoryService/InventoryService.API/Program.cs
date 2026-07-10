@@ -2,6 +2,7 @@ using InventoryService.API.Extensions;
 using InventoryService.API.Grpc;
 using InventoryService.API.Interceptors;
 using InventoryService.Application;
+using InventoryService.Application.Inventory.Options;
 using InventoryService.Infrastructure;
 using InventoryService.Infrastructure.CollectionInitializers;
 
@@ -17,6 +18,7 @@ builder.Services.AddGrpc(options =>
     options.Interceptors.Add<GrpcExceptionInterceptor>();
 });
 
+builder.Services.Configure<LowStockThresholdOptions>(builder.Configuration.GetSection(LowStockThresholdOptions.SectionName));
 builder.Services.AddApplicationServices();
 builder.Services.AddInfrastructureServices(builder.Configuration);
 

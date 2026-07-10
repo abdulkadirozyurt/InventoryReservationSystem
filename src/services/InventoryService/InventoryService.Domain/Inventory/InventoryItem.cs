@@ -112,5 +112,17 @@ public sealed class InventoryItem
         QuantityAvailable -= quantity;
         UpdatedAt = DateTime.UtcNow;
     }
+
+    public void RestoreQuantities(int quantityAvailable, int quantityReserved)
+    {
+        if (quantityAvailable < 0)
+            throw new ArgumentException("Quantity available cannot be negative.", nameof(quantityAvailable));
+        if (quantityReserved < 0)
+            throw new ArgumentException("Quantity reserved cannot be negative.", nameof(quantityReserved));
+
+        QuantityAvailable = quantityAvailable;
+        QuantityReserved = quantityReserved;
+        UpdatedAt = DateTime.UtcNow;
+    }
 }
 

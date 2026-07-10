@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using InventoryService.Application.Inventory.Abstractions;
 using InventoryService.Application.Inventory.Exceptions;
+using InventoryService.Application.Inventory.Services;
 using InventoryService.Application.Observability;
 using InventoryService.Application.Observability.Abstractions;
 using InventoryService.Application.Reservations.Abstractions;
@@ -19,6 +20,7 @@ public sealed class ReserveBatchCommandHandler(
     IInventoryUnitOfWork unitOfWork,
     IDistributedLockService distributedLockService,
     IInventoryServiceMetrics metrics,
+    LowStockAlertService lowStockAlertService,
     ILogger<ReserveBatchCommandHandler> logger)
 {
     private const string OperationName = "reserve_batch";
@@ -48,17 +50,29 @@ public sealed class ReserveBatchCommandHandler(
             return new ReserveBatchResult(false, null, validationFailures);
         }
 
-        // Collapse duplicate SKU + warehouse lines before locking and stock checks.
+        // Collapse duplicate SKU + warehouse lines before allocation and stock checks.
         var requestedItems = AggregateRequestedItems(command.Items);
 
-        // Stock lock'ları aynı SKU üzerindeki paralel değişiklikleri sıraya koyar.
+        // Fallback açıksa gerçek rezervasyon satırları lock almadan önce planlanır.
+        // Çünkü lock set'i istenen depo değil, stok düşülecek nihai SKU+depo satırlarından oluşmalıdır.
+        var allocation = await AllocateReservationItemsAsync(requestedItems, command.EnableFallback, cancellationToken);
+        if (allocation.Failures.Count > 0)
+        {
+            metrics.RecordReservationOperation(OperationName, "failed", Stopwatch.GetElapsedTime(startedAt));
+            metrics.RecordReservationFailure(OperationName, allocation.Failures[0].ErrorCode, InventoryErrorClass.Business);
+            return new ReserveBatchResult(false, null, allocation.Failures);
+        }
+
+        var allocatedItems = allocation.Items;
+
+        // Stock lock'ları nihai SKU+depo satırları üzerindeki paralel değişiklikleri sıraya koyar.
         // Order lock ise aynı OrderId farklı SKU listeleriyle tekrar gelse bile ikinci isteği bekletir.
         // Böylece idempotency kontrolü yapılırken iki istek aynı anda stok değiştiremez.
-        var reservationLockKeys = CreateReservationLockKeys(command.OrderId, requestedItems);
+        var reservationLockKeys = CreateReservationLockKeys(command.OrderId, allocatedItems);
 
         try
         {
-            // Acquire distributed locks for all requested SKU + warehouse combinations.
+            // Acquire distributed locks for all allocated SKU + warehouse combinations.
             await using var lockHandle = await distributedLockService.AcquireAsync(
                 reservationLockKeys,
                 LockExpiry,
@@ -80,7 +94,7 @@ public sealed class ReserveBatchCommandHandler(
 
                 if (existingReservation is not null)
                 {
-                    if (!HasSameReservationItems(existingReservation, requestedItems))
+                    if (!HasSameReservationItems(existingReservation, allocatedItems))
                     {
                         stockFailures.Add(new ReserveBatchFailure(
                             string.Empty,
@@ -112,26 +126,25 @@ public sealed class ReserveBatchCommandHandler(
                     return;
                 }
 
-                foreach (var requestedItem in requestedItems)
+                // Allocation lock öncesi anlık görüntüyle yapılır; lock beklerken başka işlem stok tüketebilir.
+                // Bu yüzden mutasyondan hemen önce aynı nihai SKU+depo satırlarını tekrar okuyup miktarı doğruluyoruz.
+                foreach (var allocatedItem in allocatedItems)
                 {
-                    // find stock for the requested SKU and warehouse
-                    var stockItem = await inventoryItemRepository.GetBySkuAndWarehouseAsync(requestedItem.Sku, requestedItem.WarehouseId, token);
+                    var stockItem = await inventoryItemRepository.GetBySkuAndWarehouseAsync(allocatedItem.Sku, allocatedItem.WarehouseId, token);
 
-                    // if stock is not found, add a failure and continue to the next item
                     if (stockItem is null)
                     {
-                        stockFailures.Add(new ReserveBatchFailure(requestedItem.Sku, requestedItem.WarehouseId, StockNotFound, "Stock was not found."));
+                        stockFailures.Add(new ReserveBatchFailure(allocatedItem.Sku, allocatedItem.WarehouseId, StockNotFound, "Stock was not found."));
                         continue;
                     }
 
-                    // if stock is found but the available quantity is less than the requested quantity, add a failure
-                    if (stockItem.QuantityAvailable < requestedItem.Quantity)
+                    if (stockItem.QuantityAvailable < allocatedItem.Quantity)
                     {
-                        stockFailures.Add(new ReserveBatchFailure(requestedItem.Sku, requestedItem.WarehouseId, InsufficientStock, "Insufficient stock available."));
+                        stockFailures.Add(new ReserveBatchFailure(allocatedItem.Sku, allocatedItem.WarehouseId, InsufficientStock, "Insufficient stock available."));
                         continue;
                     }
 
-                    stockItemsToReserve.Add((stockItem, requestedItem.Quantity));
+                    stockItemsToReserve.Add((stockItem, allocatedItem.Quantity));
                 }
 
                 if (stockFailures.Count > 0)
@@ -271,6 +284,72 @@ public sealed class ReserveBatchCommandHandler(
     }
 
 
+    private async Task<(ReserveBatchItemCommand[] Items, List<ReserveBatchFailure> Failures)> AllocateReservationItemsAsync(
+        IReadOnlyCollection<ReserveBatchItemCommand> requestedItems,
+        bool enableFallback,
+        CancellationToken cancellationToken)
+    {
+        var allocatedItems = new List<ReserveBatchItemCommand>();
+        var failures = new List<ReserveBatchFailure>();
+
+        foreach (var requestedItem in requestedItems)
+        {
+            if (!enableFallback)
+            {
+                var stockItem = await inventoryItemRepository.GetBySkuAndWarehouseAsync(requestedItem.Sku, requestedItem.WarehouseId, cancellationToken);
+
+                if (stockItem is null)
+                {
+                    failures.Add(new ReserveBatchFailure(requestedItem.Sku, requestedItem.WarehouseId, StockNotFound, "Stock was not found."));
+                    continue;
+                }
+
+                if (stockItem.QuantityAvailable < requestedItem.Quantity)
+                {
+                    failures.Add(new ReserveBatchFailure(requestedItem.Sku, requestedItem.WarehouseId, InsufficientStock, "Insufficient stock available."));
+                    continue;
+                }
+
+                allocatedItems.Add(requestedItem);
+                continue;
+            }
+
+            var stockItems = await inventoryItemRepository.GetBySkuAsync(requestedItem.Sku, cancellationToken);
+            var remainingQuantity = requestedItem.Quantity;
+
+            // Önce istenen depoyu, sonra alternatif depoları deterministik sırada deniyoruz.
+            // Böylece aynı stok görüntüsü için her node aynı allocation ve aynı lock sırasını üretir.
+            foreach (var stockItem in stockItems
+                         .OrderBy(item => item.WarehouseId == requestedItem.WarehouseId ? 0 : 1)
+                         .ThenBy(item => item.WarehouseId, StringComparer.Ordinal))
+            {
+                if (remainingQuantity <= 0)
+                    break;
+
+                if (stockItem.QuantityAvailable <= 0)
+                    continue;
+
+                var quantityToReserve = Math.Min(remainingQuantity, stockItem.QuantityAvailable);
+                allocatedItems.Add(new ReserveBatchItemCommand(stockItem.Sku, stockItem.WarehouseId, quantityToReserve));
+                remainingQuantity -= quantityToReserve;
+            }
+
+            if (remainingQuantity > 0)
+            {
+                failures.Add(new ReserveBatchFailure(
+                    requestedItem.Sku,
+                    requestedItem.WarehouseId,
+                    stockItems.Count == 0 ? StockNotFound : InsufficientStock,
+                    stockItems.Count == 0 ? "Stock was not found." : "Insufficient stock available."));
+            }
+        }
+
+        if (failures.Count > 0)
+            return ([], failures);
+
+        return (AggregateRequestedItems(allocatedItems), failures);
+    }
+
     private async Task PersistSuccessfulReservationAsync(
         IEnumerable<(InventoryItem StockItem, int Quantity)> stockItemsToReserve,
         string reservationId,
@@ -283,6 +362,8 @@ public sealed class ReserveBatchCommandHandler(
         {
             stockItem.Reserve(quantity);
             await inventoryItemRepository.UpdateAsync(stockItem, cancellationToken);
+
+            lowStockAlertService.Check(OperationName, command.CorrelationId, stockItem.Sku, stockItem.WarehouseId, stockItem.QuantityAvailable);
 
             reservationItems.Add(new ReservationItem(stockItem.Sku, stockItem.WarehouseId, quantity));
 

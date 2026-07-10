@@ -8,4 +8,5 @@ public sealed class MongoDbOptions
     public string InventoryTransactionsCollectionName { get; set; }
     public string CheckpointsCollectionName { get; set; } = "checkpoints";
     public string DeadLetterQueueCollectionName { get; set; } = "dead-letter-queue";
+    public string InventorySnapshotsCollectionName { get; set; } = "inventory-snapshots";
 }

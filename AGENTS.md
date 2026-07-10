@@ -179,7 +179,7 @@ Update this file when a service boundary, communication pattern, or structural c
   - Bu job servis sahipliğini bozmayacak: Order verisini OrderService API/read model üzerinden, envanter ve rezervasyon verisini InventoryService API/gRPC/read model üzerinden alacak.
   - OrderService, InventoryService'in MongoDB koleksiyonlarına; InventoryService de OrderService'in MongoDB koleksiyonlarına doğrudan erişmeyecek.
   - Mutabakat farkları, beklenen/gerçek reserved miktarları ve reconciliation sonucu technical log/audit raporu olarak kaydedilecek.
-- [ ] **Adım 5.5: Gelişmiş Envanter Yönetimi Özellikleri**
+- [x] **Adım 5.5: Gelişmiş Envanter Yönetimi Özellikleri**
   - **Multi-Warehouse Fallback:** Rezervasyon esnasında ana depoda stok yoksa `warehouseId` bazlı alternatif depolara bakan fallback yapısı eklenecek; lock sırası SKU+depo anahtarları üzerinden deterministik kalacak.
   - **Warehouse Rebalancing:** Depolar arası envanter transferini/dengelenmesini sağlayan API eklenecek (Adım 1.2'de öngörülen proto sözleşmesi kullanılacak) ve her transfer transaction log'a `Rebalance` olarak yazılacak.
   - **Low-Stock Alert:** Stok miktarı belirlenen bir eşik değerinin (threshold) altına düştüğünde SKU+depo bazında log/alert üreten mekanizma kurulacak.
@@ -187,7 +187,7 @@ Update this file when a service boundary, communication pattern, or structural c
   - **Admin Override:** `Pending`, `Expired` veya stuck durumdaki sipariş/rezervasyonları el ile iptal etme, `AdjustStock` ile envanter hatalarını düzeltme ve düzeltme nedenini audit trail'e yazma yetkisi veren admin endpoint'leri yazılacak.
   - Rebalance, snapshot restore ve admin override işlemleri `InventoryTransactions` audit trail içine reason, correlation id ve stok delta bilgisiyle yazılacak.
   - Low-stock threshold altına düşen SKU+depo kayıtları alert/log sinyali üretecek.
-- [ ] **Adım 5.6: Temel Analitik Endpoint'i**
+- [x] **Adım 5.6: Temel Analitik Endpoint'i**
   - Rezervasyon yoğunluğu, başarı/başarısızlık oranları ve ortalama sipariş tamamlanma (fulfillment) sürelerini hesaplayıp dönen bir analytics endpoint'i OrderService'e eklenecek.
   - Analytics sorgularında hesaplanan zaman aralığı, filtreler, sonuç sayısı ve yavaş sorgu durumları technical log olarak yazılacak.
 
@@ -197,7 +197,7 @@ Update this file when a service boundary, communication pattern, or structural c
 - [x] **Phase 2:** InventoryService Veri Modeli ve Dağıtık Kilit (Lock) Altyapısı
 - [ ] **Phase 3:** InventoryService gRPC İş Mantığının Geliştirilmesi
 - [ ] **Phase 4:** OrderService Sipariş Yönetimi ve Dirençli (Resilient) Entegrasyonlar
-- [ ] **Phase 5:** Otomatik Süre Aşımı (Expiry) ve Gelişmiş Operasyonel Özellikler
+- [x] **Phase 5:** Otomatik Süre Aşımı (Expiry) ve Gelişmiş Operasyonel Özellikler
 - [ ] **Phase 6:** İzlenebilirlik Panelleri, Doğrulama, Stres Testleri ve Kararlılık Kontrolleri
 
 ### Agent Automation Rule

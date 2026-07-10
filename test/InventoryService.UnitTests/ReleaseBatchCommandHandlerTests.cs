@@ -1,5 +1,7 @@
 using InventoryService.Application.Inventory.Abstractions;
 using InventoryService.Application.Inventory.Exceptions;
+using InventoryService.Application.Inventory.Options;
+using InventoryService.Application.Inventory.Services;
 using InventoryService.Application.Observability.Abstractions;
 using InventoryService.Application.Reservations.Abstractions;
 using InventoryService.Application.Reservations.Commands.ReleaseBatch;
@@ -7,6 +9,7 @@ using InventoryService.Application.Reservations.Results.Release;
 using InventoryService.Domain.DeadLetterQueue;
 using InventoryService.Domain.Reservations;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using Xunit;
 
@@ -52,8 +55,16 @@ public class ReleaseBatchCommandHandlerTests
             _inventoryUnitOfWork,
             _distributedLockService,
             _metrics,
+            CreateLowStockAlertService(),
             _logger,
             _deadLetterQueueRepository);
+    }
+
+    private static LowStockAlertService CreateLowStockAlertService()
+    {
+        return new LowStockAlertService(
+            Options.Create(new LowStockThresholdOptions { Threshold = 10 }),
+            Substitute.For<ILogger<LowStockAlertService>>());
     }
 
     [Fact]

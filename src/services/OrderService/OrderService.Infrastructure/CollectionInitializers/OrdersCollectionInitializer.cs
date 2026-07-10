@@ -79,8 +79,16 @@ public sealed class OrdersCollectionInitializer(IMongoDatabase database, IOption
                 Name = "ix_orders_status_created_at"
             });
 
+        // Index for sorting by createdAt in descending order
+        var createdAtIndexModel = new CreateIndexModel<BsonDocument>(
+            Builders<BsonDocument>.IndexKeys.Descending("createdAt"),
+            new CreateIndexOptions<BsonDocument>
+            {
+                Name = "ix_orders_created_at"
+            });
+
         await collection.Indexes.CreateManyAsync(
-            [orderNumberIndexModel, reservationIdIndexModel, statusCreatedAtIndexModel],
+            [orderNumberIndexModel, reservationIdIndexModel, statusCreatedAtIndexModel, createdAtIndexModel],
             cancellationToken);
     }
 

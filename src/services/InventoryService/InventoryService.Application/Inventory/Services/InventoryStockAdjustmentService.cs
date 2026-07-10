@@ -16,6 +16,7 @@ public sealed class InventoryStockAdjustmentService(
     IInventoryUnitOfWork unitOfWork,
     IDistributedLockService distributedLockService,
     IInventoryServiceMetrics metrics,
+    LowStockAlertService lowStockAlertService,
     ILogger<InventoryStockAdjustmentService> logger)
 {
     private const string IncreaseOperation = "increase_stock";
@@ -162,6 +163,9 @@ public sealed class InventoryStockAdjustmentService(
             {
                 // Değişen inventory item kaydını transaction içinde yazıyoruz.
                 await inventoryItemRepository.UpdateAsync(inventoryItem, transactionCancellationToken);
+
+                // Stok değişimi sonrası low stock alert tetiklenebilir, bunu transaction içinde yapıyoruz ki stok değişmeden alert gitmesin.
+                lowStockAlertService.Check(operation, correlationId, inventoryItem.Sku, inventoryItem.WarehouseId, inventoryItem.QuantityAvailable);
 
                 // Admin düzeltmesi audit olmadan tamam sayılmaz, o yüzden aynı transaction içinde yazılıyor.
                 var transaction = new InventoryTransaction(

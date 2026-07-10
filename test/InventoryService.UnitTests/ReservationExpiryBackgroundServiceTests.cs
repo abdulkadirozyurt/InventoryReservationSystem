@@ -1,4 +1,6 @@
 using InventoryService.Application.Inventory.Abstractions;
+using InventoryService.Application.Inventory.Options;
+using InventoryService.Application.Inventory.Services;
 using InventoryService.Application.Observability.Abstractions;
 using InventoryService.Application.Reservations.Abstractions;
 using InventoryService.Application.Reservations.Commands.ReleaseBatch;
@@ -57,6 +59,7 @@ public sealed class ReservationExpiryBackgroundServiceTests
             _inventoryUnitOfWork,
             _distributedLockService,
             _metrics,
+            CreateLowStockAlertService(),
             Substitute.For<ILogger<ReleaseBatchCommandHandler>>(),
             _dlqRepository
         );
@@ -89,6 +92,13 @@ public sealed class ReservationExpiryBackgroundServiceTests
         var lockHandle = Substitute.For<IDistributedLockHandle>();
         _distributedLockService.AcquireAsync(Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<TimeSpan>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
             .Returns(lockHandle);
+    }
+
+    private static LowStockAlertService CreateLowStockAlertService()
+    {
+        return new LowStockAlertService(
+            Options.Create(new LowStockThresholdOptions { Threshold = 10 }),
+            Substitute.For<ILogger<LowStockAlertService>>());
     }
 
     [Fact]

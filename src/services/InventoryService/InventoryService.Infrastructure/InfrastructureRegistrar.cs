@@ -51,6 +51,7 @@ public static class InfrastructureRegistrar
         services.AddSingleton<InventoryTransactionsCollectionInitializer>();
         services.AddSingleton<CheckpointsCollectionInitializer>();
         services.AddSingleton<DeadLetterQueueCollectionInitializer>();
+        services.AddSingleton<InventorySnapshotsCollectionInitializer>();
         services.AddSingleton<MongoCollectionInitializer>();
 
         services.AddSingleton<IDistributedLockService, RedisDistributedLockService>();
@@ -67,6 +68,7 @@ public static class InfrastructureRegistrar
         services.AddScoped<IInventoryItemRepository, InventoryItemRepository>();
         services.AddScoped<IReservationRepository, ReservationRepository>();
         services.AddScoped<IInventoryTransactionRepository, InventoryTransactionRepository>();
+        services.AddScoped<IInventorySnapshotRepository, InventorySnapshotRepository>();
         services.AddScoped<ICheckpointRepository, CheckpointRepository>();
         services.AddScoped<IDeadLetterQueueRepository, DeadLetterQueueRepository>();
         services.AddScoped<IInventoryUnitOfWork, InventoryUnitOfWork>();

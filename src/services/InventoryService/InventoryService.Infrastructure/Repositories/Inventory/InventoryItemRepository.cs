@@ -99,6 +99,53 @@ public sealed class InventoryItemRepository(
         }
     }
 
+    public async Task AddAsync(InventoryItem inventoryItem, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var session = mongoSessionProvider.CurrentSession;
+            if (session is not null)
+            {
+                await _collection.InsertOneAsync(session, inventoryItem, cancellationToken: cancellationToken);
+                return;
+            }
+
+            await _collection.InsertOneAsync(inventoryItem, cancellationToken: cancellationToken);
+        }
+        catch (MongoException exception)
+        {
+            logger.LogError(
+                exception,
+                "MongoDB failed while adding inventory item. Sku: {Sku}, WarehouseId: {WarehouseId}, ErrorCategory: {ErrorCategory}",
+                inventoryItem.Sku,
+                inventoryItem.WarehouseId,
+                "TransientMongoError");
+            throw new InventoryStoreUnavailableException("Inventory store is unavailable while adding stock", exception);
+        }
+    }
+
+    public async Task<IReadOnlyList<InventoryItem>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var session = mongoSessionProvider.CurrentSession;
+            if (session is not null)
+            {
+                return await _collection.Find(session, Builders<InventoryItem>.Filter.Empty).ToListAsync(cancellationToken);
+            }
+
+            return await _collection.Find(Builders<InventoryItem>.Filter.Empty).ToListAsync(cancellationToken);
+        }
+        catch (MongoException exception)
+        {
+            logger.LogError(
+                exception,
+                "MongoDB failed while getting all inventory items. ErrorCategory: {ErrorCategory}",
+                "TransientMongoError");
+            throw new InventoryStoreUnavailableException("Inventory store is unavailable while querying all stock", exception);
+        }
+    }
+
     public async Task<IReadOnlyDictionary<(string Sku, string WarehouseId), int>> GetReservedQuantitySnapshotAsync(CancellationToken cancellationToken = default)
     {
         try

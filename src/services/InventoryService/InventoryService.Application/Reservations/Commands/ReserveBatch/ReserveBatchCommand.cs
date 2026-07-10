@@ -3,4 +3,5 @@
 public sealed record ReserveBatchCommand(
     string OrderId,
     IReadOnlyCollection<ReserveBatchItemCommand> Items,
-    string CorrelationId);
+    string CorrelationId,
+    bool EnableFallback = false);

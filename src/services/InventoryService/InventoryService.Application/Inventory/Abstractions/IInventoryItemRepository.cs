@@ -29,8 +29,20 @@ public interface IInventoryItemRepository
     Task UpdateAsync(InventoryItem inventoryItem, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Adds a new inventory item.
+    /// </summary>
+    /// <param name="inventoryItem">The inventory item to add.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    Task AddAsync(InventoryItem inventoryItem, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets a read-only point-in-time view of actual reserved quantities by SKU+warehouse.
     /// Reconciliation uses this snapshot only for reporting drift; it must not mutate stock or acquire write locks.
     /// </summary>
     Task<IReadOnlyDictionary<(string Sku, string WarehouseId), int>> GetReservedQuantitySnapshotAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets all inventory items across all SKUs and warehouses.
+    /// </summary>
+    Task<IReadOnlyList<InventoryItem>> GetAllAsync(CancellationToken cancellationToken = default);
 }

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using InventoryService.Application.Inventory.Abstractions;
 using InventoryService.Application.Inventory.Exceptions;
+using InventoryService.Application.Inventory.Services;
 using InventoryService.Application.Observability;
 using InventoryService.Application.Observability.Abstractions;
 using InventoryService.Application.Reservations.Abstractions;
@@ -22,6 +23,7 @@ public sealed class ReleaseBatchCommandHandler(
     IInventoryUnitOfWork inventoryUnitOfWork,
     IDistributedLockService distributedLockService,
     IInventoryServiceMetrics metrics,
+    LowStockAlertService lowStockAlertService,
     ILogger<ReleaseBatchCommandHandler> logger,
     IDeadLetterQueueRepository deadLetterQueueRepository)
 {
@@ -244,6 +246,9 @@ public sealed class ReleaseBatchCommandHandler(
 
                     await inventoryItemRepository.UpdateAsync(inventoryItem, transactionCancellationToken);
 
+                    // Stok serbest bırakıldıktan sonra düşük stok uyarısı kontrol edilir; eğer mevcut stok minimum seviyeye düştüyse bildirim tetiklenir.
+                    lowStockAlertService.Check(OperationName, command.CorrelationId, inventoryItem.Sku, inventoryItem.WarehouseId, inventoryItem.QuantityAvailable);
+
                     // Release işlemi için inventory transaction kaydı oluşturulur; stok hareketi trace edilebilir olur.
                     var transaction = new InventoryTransaction(
                         releaseItem.Sku,
@@ -254,8 +259,12 @@ public sealed class ReleaseBatchCommandHandler(
                         command.CorrelationId,
                         currentReservation.ReservationId,
                         currentReservation.OrderId,
-                        // Expiry vs Release audit sebebi ayni branch'te karar verilir.
-                        command.IsExpiry ? "Expired" : "Released");
+                        // Expiry/admin/manual release sebebini audit'te ayırıyoruz; stok değişimi yine ReleaseBatch semantiğiyle kalır.
+                        command.IsExpiry
+                            ? "Expired"
+                            : string.IsNullOrWhiteSpace(command.Reason)
+                                ? "Released"
+                                : $"AdminRelease: {command.Reason}; RequestedBy: {command.RequestedBy}");
 
                     await inventoryTransactionRepository.AddAsync(transaction, transactionCancellationToken);
                 }

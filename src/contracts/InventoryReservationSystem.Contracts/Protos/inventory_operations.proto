@@ -24,6 +24,9 @@ message RebalanceWarehouseRequest {
   string target_warehouse_id = 4;
 
   int32 quantity = 5;
+
+  // reason: Dengeleme işleminin sebebi.
+  string reason = 6;
 }
 
 // RebalanceWarehouseResponse: Depo dengeleme işleminin sonucu.

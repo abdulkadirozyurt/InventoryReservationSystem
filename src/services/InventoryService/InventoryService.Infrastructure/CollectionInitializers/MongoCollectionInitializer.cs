@@ -5,7 +5,8 @@ public sealed class MongoCollectionInitializer(
     ReservationsCollectionInitializer reservationsInitializer,
     InventoryTransactionsCollectionInitializer inventoryTransactionsInitializer,
     CheckpointsCollectionInitializer checkpointsInitializer,
-    DeadLetterQueueCollectionInitializer deadLetterQueueInitializer)
+    DeadLetterQueueCollectionInitializer deadLetterQueueInitializer,
+    InventorySnapshotsCollectionInitializer inventorySnapshotsInitializer)
 {
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -14,5 +15,6 @@ public sealed class MongoCollectionInitializer(
         await inventoryTransactionsInitializer.InitializeAsync(cancellationToken);
         await checkpointsInitializer.InitializeAsync(cancellationToken);
         await deadLetterQueueInitializer.InitializeAsync(cancellationToken);
+        await inventorySnapshotsInitializer.InitializeAsync(cancellationToken);
     }
 }

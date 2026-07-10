@@ -18,6 +18,7 @@
   </Folder>
   <Folder Name="/test/">
     <Project Path="test/InventoryService.UnitTests/InventoryService.UnitTests.csproj" />
+    <Project Path="test/OrderService.UnitTests/OrderService.UnitTests.csproj" />
   </Folder>
   <Project Path="InventoryReservationSystem.AppHost/InventoryReservationSystem.AppHost.csproj" />
   <Project Path="InventoryReservationSystem.ServiceDefaults/InventoryReservationSystem.ServiceDefaults.csproj" />

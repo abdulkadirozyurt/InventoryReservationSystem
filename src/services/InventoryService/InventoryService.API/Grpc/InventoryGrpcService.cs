@@ -1,9 +1,13 @@
 using Grpc.Core;
 using InventoryReservationSystem.Contracts.Inventory;
+using InventoryService.Application.Inventory.Commands.CreateSnapshot;
 using InventoryService.Application.Inventory.Commands.DecreaseStock;
 using InventoryService.Application.Inventory.Commands.IncreaseStock;
+using InventoryService.Application.Inventory.Commands.RebalanceWarehouse;
+using InventoryService.Application.Inventory.Commands.RestoreSnapshot;
 using InventoryService.Application.Inventory.Queries;
 using InventoryService.Application.Inventory.Results;
+using InventoryService.Application.Reservations.Commands.AdminReleaseReservation;
 using InventoryService.Application.Reservations.Commands.ConfirmReservation;
 using InventoryService.Application.Reservations.Commands.ReleaseBatch;
 using InventoryService.Application.Reservations.Commands.ReserveBatch;
@@ -16,7 +20,11 @@ public sealed class InventoryGrpcService(
     ReleaseBatchCommandHandler releaseBatchCommandHandler,
     ConfirmReservationCommandHandler confirmReservationCommandHandler,
     IncreaseStockCommandHandler increaseStockCommandHandler,
-    DecreaseStockCommandHandler decreaseStockCommandHandler) : InventoryReservations.InventoryReservationsBase
+    DecreaseStockCommandHandler decreaseStockCommandHandler,
+    RebalanceWarehouseCommandHandler rebalanceWarehouseCommandHandler,
+    CreateInventorySnapshotCommandHandler createInventorySnapshotCommandHandler,
+    RestoreInventorySnapshotCommandHandler restoreInventorySnapshotCommandHandler,
+    AdminReleaseReservationCommandHandler adminReleaseReservationCommandHandler) : InventoryReservations.InventoryReservationsBase
 {
     public override async Task<ReserveBatchResponse> ReserveBatch(ReserveBatchRequest request, ServerCallContext context)
     {
@@ -24,7 +32,8 @@ public sealed class InventoryGrpcService(
         var command = new ReserveBatchCommand(
             request.OrderId,
             request.Items.Select(item => new ReserveBatchItemCommand(item.Sku, item.WarehouseId, item.Quantity)).ToArray(),
-            request.Metadata?.CorrelationId ?? string.Empty);
+            request.Metadata?.CorrelationId ?? string.Empty,
+            request.EnableFallback);
 
         // get the result from the command handler
         var result = await reserveBatchCommandHandler.HandleAsync(command, context.CancellationToken);
@@ -151,38 +160,80 @@ public sealed class InventoryGrpcService(
         return ToStockAdjustmentResponse(result, request.Metadata);
     }
 
-    public override Task<RebalanceWarehouseResponse> RebalanceWarehouse(RebalanceWarehouseRequest request, ServerCallContext context)
+    public override async Task<RebalanceWarehouseResponse> RebalanceWarehouse(RebalanceWarehouseRequest request, ServerCallContext context)
     {
-        var response = new RebalanceWarehouseResponse
+        var command = new RebalanceWarehouseCommand(
+            request.Sku,
+            request.SourceWarehouseId,
+            request.TargetWarehouseId,
+            request.Quantity,
+            request.Reason,
+            request.Metadata?.CorrelationId ?? string.Empty);
+
+        var result = await rebalanceWarehouseCommandHandler.HandleAsync(command, context.CancellationToken);
+
+        return new RebalanceWarehouseResponse
         {
             Metadata = CreateMetadata(request.Metadata),
-            Success = true
+            Success = result.Success,
+            ErrorCode = result.ErrorCode ?? string.Empty,
+            ErrorMessage = result.ErrorMessage ?? string.Empty
         };
-
-        return Task.FromResult(response);
     }
 
-    public override Task<CreateInventorySnapshotResponse> CreateInventorySnapshot(CreateInventorySnapshotRequest request, ServerCallContext context)
+    public override async Task<AdminReleaseReservationResponse> AdminReleaseReservation(AdminReleaseReservationRequest request, ServerCallContext context)
     {
-        var response = new CreateInventorySnapshotResponse
+        var command = new AdminReleaseReservationCommand(
+            request.ReservationId,
+            request.Reason,
+            request.RequestedBy,
+            request.Metadata?.CorrelationId ?? string.Empty);
+
+        var result = await adminReleaseReservationCommandHandler.HandleAsync(command, context.CancellationToken);
+
+        return new AdminReleaseReservationResponse
         {
             Metadata = CreateMetadata(request.Metadata),
-            Success = true,
-            SnapshotId = Guid.CreateVersion7().ToString("N")
+            Success = result.Success,
+            ErrorCode = result.ErrorCode ?? string.Empty,
+            ErrorMessage = result.ErrorMessage ?? string.Empty
         };
-
-        return Task.FromResult(response);
     }
 
-    public override Task<RestoreInventorySnapshotResponse> RestoreInventorySnapshot(RestoreInventorySnapshotRequest request, ServerCallContext context)
+    public override async Task<CreateInventorySnapshotResponse> CreateInventorySnapshot(CreateInventorySnapshotRequest request, ServerCallContext context)
     {
-        var response = new RestoreInventorySnapshotResponse
+        var command = new CreateInventorySnapshotCommand(
+            request.RequestedBy,
+            request.Metadata?.CorrelationId ?? Guid.NewGuid().ToString("N"));
+
+        var result = await createInventorySnapshotCommandHandler.HandleAsync(command, context.CancellationToken);
+
+        return new CreateInventorySnapshotResponse
         {
             Metadata = CreateMetadata(request.Metadata),
-            Success = true
+            Success = result.Success,
+            SnapshotId = result.SnapshotId ?? string.Empty,
+            ErrorCode = result.ErrorCode ?? string.Empty,
+            ErrorMessage = result.ErrorMessage ?? string.Empty
         };
+    }
 
-        return Task.FromResult(response);
+    public override async Task<RestoreInventorySnapshotResponse> RestoreInventorySnapshot(RestoreInventorySnapshotRequest request, ServerCallContext context)
+    {
+        var command = new RestoreInventorySnapshotCommand(
+            request.SnapshotId,
+            request.RequestedBy,
+            request.Metadata?.CorrelationId ?? Guid.NewGuid().ToString("N"));
+
+        var result = await restoreInventorySnapshotCommandHandler.HandleAsync(command, context.CancellationToken);
+
+        return new RestoreInventorySnapshotResponse
+        {
+            Metadata = CreateMetadata(request.Metadata),
+            Success = result.Success,
+            ErrorCode = result.ErrorCode ?? string.Empty,
+            ErrorMessage = result.ErrorMessage ?? string.Empty
+        };
     }
 
     private static StockAdjustmentResponse ToStockAdjustmentResponse(StockAdjustmentResult result, RequestMetadata? metadata)

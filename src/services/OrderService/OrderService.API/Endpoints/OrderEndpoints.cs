@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
@@ -10,6 +11,7 @@ using OrderService.Application.Orders.Commands.ConfirmOrder;
 using OrderService.Application.Orders.Commands.CreateOrder;
 using OrderService.Application.Orders.Idempotency;
 using OrderService.Application.Orders.Queries.GetOrder;
+using OrderService.Application.Orders.Queries.GetOrderAnalytics;
 using OrderService.Application.Orders.Queries.ListOrders;
 using OrderService.Application.Orders.Results;
 using OrderService.Domain.Orders;
@@ -40,6 +42,9 @@ public static class OrderEndpoints
 
         group.MapPost("/{orderNumber}/confirm", ConfirmOrderAsync)
             .WithName("ConfirmOrder");
+
+        group.MapGet("/analytics", GetOrderAnalyticsAsync)
+            .WithName("GetOrderAnalytics");
 
         return app;
     }
@@ -369,6 +374,96 @@ public static class OrderEndpoints
         return context.Items[Extensions.CorrelationIdItemName]?.ToString()
             ?? Guid.CreateVersion7().ToString("N");
     }
+
+    private static DateTime NormalizeToUtc(DateTime value)
+    {
+        return value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+        };
+    }
+
+    private static async Task<IResult> GetOrderAnalyticsAsync(
+        DateTime? from,
+        DateTime? to,
+        string? sku,
+        string? warehouseId,
+        OrderStatus? status,
+        GetOrderAnalyticsQueryHandler handler,
+        ILoggerFactory loggerFactory,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("OrderService.API.Endpoints.GetOrderAnalytics");
+        var correlationId = GetCorrelationId(context);
+
+        if (!from.HasValue || !to.HasValue)
+        {
+            return Results.BadRequest("From and To parameters are required.");
+        }
+
+        var queryFrom = NormalizeToUtc(from.Value);
+        var queryTo = NormalizeToUtc(to.Value);
+
+        if (queryFrom > queryTo)
+        {
+            return Results.BadRequest("From date must be less than or equal to To date.");
+        }
+
+        if ((queryTo - queryFrom).TotalDays > 31.0)
+        {
+            return Results.BadRequest("Date range limit cannot exceed 31 days.");
+        }
+
+        var query = new GetOrderAnalyticsQuery(queryFrom, queryTo, sku, warehouseId, status);
+
+        var stopwatch = Stopwatch.StartNew();
+        var result = await handler.HandleAsync(query, cancellationToken);
+        stopwatch.Stop();
+
+        var elapsedMs = stopwatch.ElapsedMilliseconds;
+        var slowQuery = elapsedMs > 500;
+
+        if (slowQuery)
+        {
+            logger.LogWarning(
+                "Order analytics query executed. CorrelationId: {CorrelationId}, From: {From}, To: {To}, Sku: {Sku}, WarehouseId: {WarehouseId}, Status: {Status}, ResultCount: {ResultCount}, ElapsedMs: {ElapsedMs}, SlowQuery: {SlowQuery}",
+                correlationId,
+                queryFrom,
+                queryTo,
+                sku,
+                warehouseId,
+                status?.ToString(),
+                result.TotalOrdersFound,
+                elapsedMs,
+                slowQuery);
+        }
+        else
+        {
+            logger.LogInformation(
+                "Order analytics query executed. CorrelationId: {CorrelationId}, From: {From}, To: {To}, Sku: {Sku}, WarehouseId: {WarehouseId}, Status: {Status}, ResultCount: {ResultCount}, ElapsedMs: {ElapsedMs}, SlowQuery: {SlowQuery}",
+                correlationId,
+                queryFrom,
+                queryTo,
+                sku,
+                warehouseId,
+                status?.ToString(),
+                result.TotalOrdersFound,
+                elapsedMs,
+                slowQuery);
+        }
+
+        var response = new GetOrderAnalyticsResponse(
+            result.ReservationDensity,
+            result.SuccessRatio,
+            result.FailureRatio,
+            result.AverageFulfillmentDurationSeconds,
+            result.TotalOrdersFound);
+
+        return Results.Ok(response);
+    }
 }
 
 public sealed record CreateOrderRequest(IReadOnlyList<CreateOrderItemRequest> Items);
@@ -416,3 +511,10 @@ public sealed record ConfirmOrderResponse(
     bool Success,
     string? ErrorCode = null,
     string? ErrorMessage = null);
+
+public sealed record GetOrderAnalyticsResponse(
+    double ReservationDensity,
+    double SuccessRatio,
+    double FailureRatio,
+    double AverageFulfillmentDurationSeconds,
+    int TotalOrdersFound);
