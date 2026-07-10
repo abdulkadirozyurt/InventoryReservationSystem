@@ -6,11 +6,17 @@ import ErrorBanner from '../components/ErrorBanner';
 import LoadingState from '../components/LoadingState';
 import StatusBadge from '../components/StatusBadge';
 import {
+  useBulkCancel,
   useCancelOrder,
   useOrderList,
   describeError,
 } from '../hooks/useOrders';
-import type { ListOrdersQuery, OrderStatus } from '../types/orders';
+import type {
+  BulkCancelOrdersResponse,
+  ListOrdersQuery,
+  Order,
+  OrderStatus,
+} from '../types/orders';
 
 const STATUS_OPTIONS: OrderStatus[] = ['Pending', 'Confirmed', 'Cancelled', 'Expired'];
 
@@ -26,6 +32,9 @@ export default function OrdersPage() {
   const [status, setStatus] = useState<OrderStatus | ''>('');
   const [from, setFrom] = useState(daysAgoIso(7));
   const [to, setTo] = useState(todayIso());
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [reason, setReason] = useState('');
+  const [result, setResult] = useState<BulkCancelOrdersResponse | null>(null);
 
   const query = useMemo<ListOrdersQuery>(() => {
     const q: ListOrdersQuery = {};
@@ -36,14 +45,57 @@ export default function OrdersPage() {
   }, [status, from, to]);
 
   const listQ = useOrderList(query);
+  const bulkM = useBulkCancel();
 
-  const orders = listQ.data ?? [];
+  const orders: Order[] = listQ.data ?? [];
 
   if (listQ.error) {
     const { code, message } = describeError(listQ.error);
     return <ErrorBanner message={message} code={code} />;
   }
   if (listQ.isLoading) return <LoadingState label="Loading orders…" />;
+
+  const pendingOrders = orders.filter((o) => o.status === 'Pending');
+  const selectedNumbers = Object.entries(selected)
+    .filter(([, v]) => v)
+    .map(([k]) => k);
+  const dedupedSelected = Array.from(new Set(selectedNumbers));
+  const allPendingSelected =
+    pendingOrders.length > 0 && pendingOrders.every((o) => selected[o.orderNumber]);
+
+  function toggle(orderNumber: string) {
+    setSelected((prev) => ({ ...prev, [orderNumber]: !prev[orderNumber] }));
+  }
+
+  function selectAllPending() {
+    const next: Record<string, boolean> = {};
+    for (const o of pendingOrders) next[o.orderNumber] = true;
+    setSelected(next);
+  }
+
+  function clearSelection() {
+    setSelected({});
+  }
+
+  function submitBulkCancel() {
+    if (dedupedSelected.length === 0) return;
+    const n = dedupedSelected.length;
+    const ok = window.confirm(
+      `Cancel ${n} pending order${n === 1 ? '' : 's'}? This is idempotent.`,
+    );
+    if (!ok) return;
+    bulkM.mutate(
+      { orderNumbers: dedupedSelected, reason: reason.trim() || undefined },
+      {
+        onSuccess: (resp) => {
+          setResult(resp);
+          setSelected({});
+          setReason('');
+          void listQ.refetch();
+        },
+      },
+    );
+  }
 
   return (
     <div className="page-stack">
@@ -52,7 +104,7 @@ export default function OrdersPage() {
         subtitle="Create, confirm, cancel multi-SKU batch reservations."
         actions={
           <>
-            <Link className="btn" to="/orders/bulk-cancel">Bulk cancel</Link>
+            <Link className="btn" to="/orders/bulk-cancel">Bulk cancel (by list)</Link>
             <Link className="btn btn--primary" to="/orders/new">+ New order</Link>
           </>
         }
@@ -83,12 +135,52 @@ export default function OrdersPage() {
           >Refresh</button>
         </form>
 
+        <div className="bulk-bar">
+          <button
+            type="button"
+            className="btn btn--small"
+            onClick={selectAllPending}
+            disabled={pendingOrders.length === 0}
+          >Select all pending</button>
+          <button
+            type="button"
+            className="btn btn--small"
+            onClick={clearSelection}
+            disabled={selectedNumbers.length === 0}
+          >Clear ({selectedNumbers.length})</button>
+          <input
+            type="text"
+            placeholder="Bulk-cancel reason (optional)"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            style={{ flex: 1, minWidth: 160 }}
+          />
+          <button
+            type="button"
+            className="btn btn--danger"
+            disabled={bulkM.isPending || dedupedSelected.length === 0}
+            onClick={submitBulkCancel}
+          >{bulkM.isPending ? 'Cancelling…' : `Cancel selected (${dedupedSelected.length})`}</button>
+        </div>
+
         {orders.length === 0 ? (
           <p className="empty">No orders match the current filter.</p>
         ) : (
           <table className="data-table">
             <thead>
               <tr>
+                <th style={{ width: 32 }}>
+                  <input
+                    type="checkbox"
+                    aria-label="Select all pending visible"
+                    checked={allPendingSelected}
+                    disabled={pendingOrders.length === 0}
+                    onChange={(e) => {
+                      if (e.target.checked) selectAllPending();
+                      else clearSelection();
+                    }}
+                  />
+                </th>
                 <th>Order #</th>
                 <th>Status</th>
                 <th>Items</th>
@@ -103,8 +195,18 @@ export default function OrdersPage() {
                 const requested = o.items.reduce((s, i) => s + i.requestedQuantity, 0);
                 const reserved = o.items.reduce((s, i) => s + i.reservedQuantity, 0);
                 const canCancel = o.status === 'Pending';
+                const isSelected = Boolean(selected[o.orderNumber]);
                 return (
-                  <tr key={o.orderNumber}>
+                  <tr key={o.orderNumber} className={isSelected ? 'row--selected' : undefined}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${o.orderNumber}`}
+                        checked={isSelected}
+                        disabled={!canCancel}
+                        onChange={() => toggle(o.orderNumber)}
+                      />
+                    </td>
                     <td><Link to={`/orders/${o.orderNumber}`}>{o.orderNumber}</Link></td>
                     <td><StatusBadge status={o.status} /></td>
                     <td>{o.items.length}</td>
@@ -126,6 +228,41 @@ export default function OrdersPage() {
           </table>
         )}
       </Card>
+
+      {result && (
+        <Card
+          title={`Bulk cancel result (${result.results.length})`}
+          subtitle={`${result.results.filter((r) => r.success).length} ok, ${result.results.filter((r) => !r.success).length} failed`}
+          actions={
+            <button
+              type="button"
+              className="btn btn--small"
+              onClick={() => setResult(null)}
+            >Dismiss</button>
+          }
+        >
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Order #</th>
+                <th>Success</th>
+                <th>Code</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.results.map((r) => (
+                <tr key={r.orderNumber}>
+                  <td><code>{r.orderNumber}</code></td>
+                  <td>{r.success ? 'Yes' : 'No'}</td>
+                  <td>{r.errorCode ?? '—'}</td>
+                  <td>{r.errorMessage ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
     </div>
   );
 }

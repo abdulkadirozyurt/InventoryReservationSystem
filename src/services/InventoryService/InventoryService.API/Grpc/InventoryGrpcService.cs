@@ -16,6 +16,7 @@ namespace InventoryService.API.Grpc;
 
 public sealed class InventoryGrpcService(
     GetStockQueryHandler getStockQueryHandler,
+    ListInventoryItemsQueryHandler listInventoryItemsQueryHandler,
     ReserveBatchCommandHandler reserveBatchCommandHandler,
     ReleaseBatchCommandHandler releaseBatchCommandHandler,
     ConfirmReservationCommandHandler confirmReservationCommandHandler,
@@ -124,6 +125,32 @@ public sealed class InventoryGrpcService(
             ErrorCode = stockResult.ErrorCode ?? string.Empty,
             ErrorMessage = stockResult.ErrorMessage ?? string.Empty
         };
+    }
+
+    public override async Task<ListInventoryItemsResponse> ListInventoryItems(ListInventoryItemsRequest request, ServerCallContext context)
+    {
+        var query = new ListInventoryItemsQuery(
+            string.IsNullOrWhiteSpace(request.Search) ? null : request.Search,
+            string.IsNullOrWhiteSpace(request.Sku) ? null : request.Sku,
+            string.IsNullOrWhiteSpace(request.WarehouseId) ? null : request.WarehouseId,
+            request.Metadata?.CorrelationId ?? string.Empty);
+
+        var items = await listInventoryItemsQueryHandler.HandleAsync(query, context.CancellationToken);
+
+        var response = new ListInventoryItemsResponse
+        {
+            Metadata = CreateMetadata(request.Metadata)
+        };
+
+        response.Items.AddRange(items.Select(item => new InventoryItemStock
+        {
+            Sku = item.Sku,
+            WarehouseId = item.WarehouseId,
+            QuantityAvailable = item.QuantityAvailable,
+            QuantityReserved = item.QuantityReserved
+        }));
+
+        return response;
     }
 
     public override async Task<StockAdjustmentResponse> IncreaseStock(IncreaseStockRequest request, ServerCallContext context)

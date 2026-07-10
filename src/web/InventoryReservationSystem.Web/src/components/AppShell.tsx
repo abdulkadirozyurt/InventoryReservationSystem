@@ -1,11 +1,11 @@
 import { Outlet } from 'react-router-dom';
 
-import NavBar from './NavBar';
+import Sidebar from './Sidebar';
 
 export default function AppShell() {
   return (
     <div className="app-shell">
-      <NavBar />
+      <Sidebar />
       <main className="app-shell__main">
         <Outlet />
       </main>

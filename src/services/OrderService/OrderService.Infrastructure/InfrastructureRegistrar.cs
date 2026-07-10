@@ -3,9 +3,11 @@ using Microsoft.Extensions.DependencyInjection;
 using InventoryReservationSystem.Contracts.Inventory;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
+using OrderService.Application.Inventory;
 using OrderService.Application.Orders.Abstractions;
 using OrderService.Infrastructure.CollectionInitializers;
 using OrderService.Infrastructure.HealthChecks;
+using OrderService.Infrastructure.Inventory;
 using OrderService.Infrastructure.Mongo;
 using OrderService.Infrastructure.Repositories.Orders;
 using OrderService.Infrastructure.Services;
@@ -81,6 +83,7 @@ public static class InfrastructureRegistrar
         services.AddSingleton<InventoryGrpcResilienceExecutor>();
 
         services.AddScoped<IInventoryReservationService, InventoryReservationService>();
+        services.AddScoped<IInventoryFacade, InventoryFacade>();
 
         services.AddGrpcClient<InventoryReservations.InventoryReservationsClient>(options =>
         {

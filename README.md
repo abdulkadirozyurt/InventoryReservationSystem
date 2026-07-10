@@ -204,7 +204,7 @@ A Dockerized React UI is available for end-to-end demonstrations without calling
 docker compose up --build
 ```
 
-Open `http://localhost:5173` to create, list, inspect, confirm, cancel, and bulk-cancel orders through OrderService. The UI also surfaces analytics and backend health/readiness status, while linking to Grafana (`http://localhost:3000`), Prometheus (`http://localhost:9090`), and RedisInsight (`http://localhost:5540`).
+Open `http://localhost:5173` to create, list, inspect, confirm, cancel, and bulk-cancel orders through OrderService. The UI uses a responsive sidebar and also exposes inventory lookup/adjustment, warehouse transfer, and snapshot operations through an OrderService REST facade that forwards to InventoryService over gRPC. Grafana (`http://localhost:3000`), Prometheus (`http://localhost:9090`), and RedisInsight (`http://localhost:5540`) remain available for technical monitoring.
 
 ---
 

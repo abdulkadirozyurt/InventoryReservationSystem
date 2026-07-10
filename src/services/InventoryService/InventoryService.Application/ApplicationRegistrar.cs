@@ -20,6 +20,7 @@ public static class ApplicationRegistrar
     public static IServiceCollection AddApplicationServices(this IServiceCollection services)
     {
         services.AddScoped<GetStockQueryHandler>();
+        services.AddScoped<ListInventoryItemsQueryHandler>();
         services.AddScoped<ReserveBatchCommandHandler>();
         services.AddScoped<ReleaseBatchCommandHandler>();
         services.AddScoped<ConfirmReservationCommandHandler>();

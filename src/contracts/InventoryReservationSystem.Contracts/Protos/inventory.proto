@@ -35,6 +35,9 @@ service InventoryReservations {
   // GetStock: Tek SKU için anlık stok bilgisini ister.
   rpc GetStock (GetStockRequest) returns (GetStockResponse);
 
+  // ListInventoryItems: UI katalog/dropdown için gerçek envanter satırlarını ister.
+  rpc ListInventoryItems (ListInventoryItemsRequest) returns (ListInventoryItemsResponse);
+
   // IncreaseStock: Tek SKU için stoğu artırmayı ister.
   rpc IncreaseStock(IncreaseStockRequest) returns (StockAdjustmentResponse);
 

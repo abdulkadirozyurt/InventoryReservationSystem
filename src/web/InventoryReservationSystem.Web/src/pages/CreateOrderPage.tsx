@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 
 import Card from '../components/Card';
 import ErrorBanner from '../components/ErrorBanner';
+import LoadingState from '../components/LoadingState';
 import { useCreateOrder, describeError } from '../hooks/useOrders';
+import { useInventoryCatalogue } from '../hooks/useInventory';
 import type { CreateOrderItemRequest } from '../types/orders';
 
 interface RowDraft extends CreateOrderItemRequest {
-  /** local-only key for React lists */
   key: string;
 }
 
@@ -20,16 +21,20 @@ function makeRow(sku = '', warehouseId = '', quantity = 1): RowDraft {
 }
 
 function genIdempotencyKey(): string {
-  // RFC4122 v4 — backend accepts any non-empty string but we mirror its convention.
   return crypto.randomUUID();
 }
 
 export default function CreateOrderPage() {
   const nav = useNavigate();
   const [rows, setRows] = useState<RowDraft[]>([makeRow(), makeRow()]);
-  const [idemKey, setIdemKey] = useState<string>(genIdempotencyKey());
+  const [idemKey] = useState<string>(genIdempotencyKey());
   const [validationError, setValidationError] = useState<string | null>(null);
   const createM = useCreateOrder();
+
+  const catalogueQ = useInventoryCatalogue();
+  const catalogue = catalogueQ.data;
+  const skuOptions = [...new Set((catalogue ?? []).map(c => c.sku))].sort();
+  const warehouseOptions = [...new Set((catalogue ?? []).map(c => c.warehouseId))].sort();
 
   function updateRow(key: string, patch: Partial<RowDraft>) {
     setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -56,12 +61,9 @@ export default function CreateOrderPage() {
       }
       cleanItems.push({ sku, warehouseId: warehouse, quantity: Math.trunc(qty) });
     }
-    if (!idemKey.trim()) {
-      return setValidationError('Idempotency-Key is required.');
-    }
 
     createM.mutate(
-      { body: { items: cleanItems }, idempotencyKey: idemKey.trim() },
+      { body: { items: cleanItems }, idempotencyKey: idemKey },
       {
         onSuccess: (resp) => {
           if (resp.success && resp.orderNumber) {
@@ -74,16 +76,18 @@ export default function CreateOrderPage() {
 
   const err = createM.error ? describeError(createM.error) : null;
 
+  if (catalogueQ.isLoading) return <LoadingState label="Loading inventory catalogue…" />;
+
   return (
     <div className="page-stack">
       <Card
         title="New order"
-        subtitle="All-or-nothing multi-SKU reservation. Send the same Idempotency-Key to retry safely."
+        subtitle="All-or-nothing multi-SKU reservation. Idempotency-Key is generated per request — retry safely."
       >
         {validationError && <ErrorBanner message={validationError} variant="warning" />}
         {err && <ErrorBanner message={err.message} code={err.code} />}
         {createM.data && !createM.data.success && createM.data.failures.length > 0 && (
-          <Card title="Partial failures" >
+          <Card title="Partial failures">
             <ul className="failure-list">
               {createM.data.failures.map((f, i) => (
                 <li key={i}>
@@ -93,25 +97,6 @@ export default function CreateOrderPage() {
             </ul>
           </Card>
         )}
-
-        <label className="row">
-          <span>Idempotency-Key</span>
-          <div className="idem-row">
-            <input
-              type="text"
-              value={idemKey}
-              onChange={(e) => setIdemKey(e.target.value)}
-              spellCheck={false}
-              autoComplete="off"
-            />
-            <button
-              type="button"
-              className="btn"
-              onClick={() => setIdemKey(genIdempotencyKey())}
-            >Regenerate</button>
-          </div>
-          <small className="hint">Backend rejects empty keys and conflicting bodies.</small>
-        </label>
 
         <h3 className="section-title">Items</h3>
         <table className="data-table">
@@ -127,20 +112,22 @@ export default function CreateOrderPage() {
             {rows.map((r) => (
               <tr key={r.key}>
                 <td>
-                  <input
-                    type="text"
+                  <select
                     value={r.sku}
                     onChange={(e) => updateRow(r.key, { sku: e.target.value })}
-                    placeholder="SKU-001"
-                  />
+                  >
+                    <option value="">-- SKU --</option>
+                    {skuOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
                 </td>
                 <td>
-                  <input
-                    type="text"
+                  <select
                     value={r.warehouseId}
                     onChange={(e) => updateRow(r.key, { warehouseId: e.target.value })}
-                    placeholder="WH-A"
-                  />
+                  >
+                    <option value="">-- Warehouse --</option>
+                    {warehouseOptions.map(w => <option key={w} value={w}>{w}</option>)}
+                  </select>
                 </td>
                 <td style={{ minWidth: 80 }}>
                   <input

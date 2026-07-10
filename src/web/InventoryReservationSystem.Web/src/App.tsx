@@ -6,7 +6,9 @@ import OrdersPage from './pages/OrdersPage';
 import OrderDetailPage from './pages/OrderDetailPage';
 import CreateOrderPage from './pages/CreateOrderPage';
 import BulkCancelPage from './pages/BulkCancelPage';
-import HealthPage from './pages/HealthPage';
+import InventoryPage from './pages/InventoryPage';
+import StockTransfersPage from './pages/StockTransfersPage';
+import SnapshotsPage from './pages/SnapshotsPage';
 import NotFoundPage from './pages/NotFoundPage';
 
 export default function App() {
@@ -18,7 +20,9 @@ export default function App() {
         <Route path="/orders/new" element={<CreateOrderPage />} />
         <Route path="/orders/bulk-cancel" element={<BulkCancelPage />} />
         <Route path="/orders/:orderNumber" element={<OrderDetailPage />} />
-        <Route path="/health" element={<HealthPage />} />
+        <Route path="/inventory" element={<InventoryPage />} />
+        <Route path="/inventory/transfers" element={<StockTransfersPage />} />
+        <Route path="/inventory/snapshots" element={<SnapshotsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

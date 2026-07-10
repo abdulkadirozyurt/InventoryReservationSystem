@@ -48,5 +48,6 @@ app.MapScalarApiReference();
 app.MapDefaultEndpoints();
 var api = app.MapGroup("/api");
 api.MapOrderEndpoints();
+api.MapInventoryEndpoints();
 
 app.Run();

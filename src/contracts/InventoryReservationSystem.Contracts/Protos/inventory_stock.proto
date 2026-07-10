@@ -10,6 +10,30 @@ import "inventory_common.proto";
 // Stock operations
 // -----------------------------------------------------------------------------
 
+// InventoryItemStock: Katalog/dropdown ve stok listesi için tek SKU+depo satırı.
+message InventoryItemStock {
+  string sku = 1;
+  string warehouse_id = 2;
+  int32 quantity_available = 3;
+  int32 quantity_reserved = 4;
+}
+
+// ListInventoryItemsRequest: Envanter katalog/listesi için opsiyonel filtreler.
+message ListInventoryItemsRequest {
+  RequestMetadata metadata = 1;
+  string search = 2;
+  string sku = 3;
+  string warehouse_id = 4;
+}
+
+// ListInventoryItemsResponse: UI dropdown/autocomplete ve stok listesi için gerçek envanter satırları.
+message ListInventoryItemsResponse {
+  ResponseMetadata metadata = 1;
+  repeated InventoryItemStock items = 2;
+  string error_code = 3;
+  string error_message = 4;
+}
+
 // GetStockRequest: Tek SKU için stok sorgusu.
 message GetStockRequest {
   RequestMetadata metadata = 1;

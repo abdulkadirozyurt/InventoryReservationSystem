@@ -49,7 +49,7 @@ export default function BulkCancelPage() {
       return;
     }
     bulkM.mutate(
-      { orderNumbers: ids, reason: reason || undefined },
+      { orderNumbers: Array.from(new Set(ids)), reason: reason || undefined },
       {
         onSuccess: () => {
           setRawText('');
@@ -62,7 +62,7 @@ export default function BulkCancelPage() {
   function submitSelected() {
     if (selectedNumbers.length === 0) return;
     bulkM.mutate(
-      { orderNumbers: selectedNumbers, reason: reason || undefined },
+      { orderNumbers: Array.from(new Set(selectedNumbers)), reason: reason || undefined },
       {
         onSuccess: () => {
           clearSelection();
@@ -80,8 +80,13 @@ export default function BulkCancelPage() {
       <Card
         title="Bulk cancel"
         subtitle="Cancel many pending orders in one request — idempotent per order."
-        actions={<Link className="btn" to="/orders">← back</Link>}
+        actions={<Link className="btn" to="/orders">← back to orders</Link>}
       >
+        <p className="hint">
+          Tip: the primary path is now checkbox selection on the{' '}
+          <Link to="/orders">Orders</Link> page. This page stays for paste-by-list or
+          pick-from-pending workflows.
+        </p>
         {err && <ErrorBanner message={err.message} code={err.code} />}
 
         <label className="row">

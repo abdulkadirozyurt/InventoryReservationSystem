@@ -179,23 +179,26 @@ Detailed definition, requirements, evaluation scenarios, and deliverables: [requ
 - [x] **7.2 — React/Vite TypeScript UI**
   - `src/web/InventoryReservationSystem.Web/` oluşturuldu
   - React Router, TanStack Query, typed API client, normalized error handling, reusable UI components eklendi
-  - UI sayfaları: dashboard, create order, orders list/filter, order detail, bulk cancel, health
+  - UI shell top navigation yerine responsive sidebar kullanır
+  - UI sayfaları: overview, orders list/filter, create order, order detail, selected bulk cancel, inventory lookup/adjustment, stock transfers, snapshots
+  - Health ekranı son kullanıcı menüsünden kaldırıldı; health endpointleri teknik/runtime kullanım için kalır
 - [x] **7.3 — Endpoint Coverage ve Demo Akışları**
-  - Create order + editable `Idempotency-Key`
+  - Create order + uygulama tarafından otomatik üretilen gizli `Idempotency-Key`
   - List/filter orders
   - Order detail
   - Confirm order
   - Cancel order
-  - Bulk cancel
+  - Orders list üzerinden checkbox seçimiyle bulk cancel + onay
   - Analytics KPI kartları
-  - Health/readiness status kartları ve Grafana/Prometheus/RedisInsight linkleri
+  - Inventory stock lookup/adjustment, warehouse transfer, snapshot create/restore akışları OrderService REST facade üzerinden InventoryService gRPC çağırır
+  - Sahte inventory list/history gösterilmez; eksik katalog/history read API'leri UI'da açıkça belirtilir
 - [x] **7.4 — Verification Proof**
   - `npm run build --prefix src/web/InventoryReservationSystem.Web` geçti
   - `docker compose config --quiet` geçti
-  - `docker compose build frontend-web` geçti
-  - `dotnet build InventoryReservationSystem.slnx` geçti (mevcut NuGet/nullable uyarılarıyla)
-  - Runtime proof: `http://localhost:5173/`, `/health`, `/health/ready`, `/api/orders` 200 döndü
-  - Runtime proof: frontend proxy üzerinden create/detail/confirm/cancel/bulk-cancel/analytics akışları çalıştı
+  - `docker compose build orderservice-api frontend-web` geçti
+  - `dotnet build InventoryReservationSystem.slnx` geçti (mevcut NuGet uyarılarıyla)
+  - Runtime proof: `http://localhost:5173/`, `/api/orders`, `/api/inventory/stock?sku=SKU-001&warehouseId=WH-1` frontend proxy üzerinden 200 döndü
+  - Runtime proof: inventory stock endpoint seed data için gerçek stok döndürdü (`SKU-001`, `WH-1`, available 100, reserved 5)
 
 ### Live Project State
 
